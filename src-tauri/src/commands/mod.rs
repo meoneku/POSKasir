@@ -419,11 +419,21 @@ pub fn create_transaction(
     let rand_seq = Local::now().format("%H%M%S").to_string();
     let invoice_num = format!("INV/{}/{}", date_str, rand_seq);
 
-    // 1. Simpan header transaksi
+    // Hitung status pembayaran berdasarkan total yang dibayar
+    let total_paid: f64 = input.payments.iter().map(|p| p.amount_paid).sum();
+    let payment_status = if total_paid >= input.grand_total {
+        "paid"
+    } else if total_paid > 0.0 {
+        "partial"
+    } else {
+        "unpaid"
+    };
+
+    // 1. Simpan header transaksi (termasuk due_date untuk tempo)
     tx.execute(
         "INSERT INTO transactions (id, invoice_number, order_type, shift_id, customer_id, cashier_id,
-                                   subtotal, discount_total, tax_mode, tax_base_amount, tax_total, grand_total, payment_status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'paid')",
+                                   subtotal, discount_total, tax_mode, tax_base_amount, tax_total, grand_total, payment_status, due_date)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             tx_id,
             invoice_num,
@@ -437,9 +447,23 @@ pub fn create_transaction(
             input.tax_base_amount,
             input.tax_total,
             input.grand_total,
+            payment_status,
+            input.due_date,
         ],
     )
     .map_err(|e| e.to_string())?;
+
+    // Jika ada sisa piutang dan customer_id tersedia, catat ke saldo piutang customer
+    if let Some(ref cust_id) = input.customer_id {
+        let unpaid = input.grand_total - total_paid;
+        if unpaid > 0.0 {
+            tx.execute(
+                "UPDATE customers SET current_debt = current_debt + ?1 WHERE id = ?2",
+                params![unpaid, cust_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
 
     // 2. Simpan item transaksi & potong stok produk atomik
     for item in input.items {
@@ -518,7 +542,7 @@ pub fn get_recent_transactions(db: State<'_, Database>) -> Result<Vec<Transactio
     let mut stmt = conn
         .prepare(
             "SELECT t.id, t.invoice_number, t.order_type, t.cashier_id, u.full_name, c.name,
-                    t.subtotal, t.tax_total, t.grand_total, t.payment_status, t.created_at
+                    t.subtotal, t.tax_total, t.grand_total, t.payment_status, t.due_date, t.created_at
              FROM transactions t
              JOIN users u ON t.cashier_id = u.id
              LEFT JOIN customers c ON t.customer_id = c.id
@@ -539,7 +563,8 @@ pub fn get_recent_transactions(db: State<'_, Database>) -> Result<Vec<Transactio
                 tax_total: r.get(7)?,
                 grand_total: r.get(8)?,
                 payment_status: r.get(9)?,
-                created_at: r.get(10)?,
+                due_date: r.get(10)?,
+                created_at: r.get(11)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -993,6 +1018,93 @@ fn format_rupiah(val: f64) -> String {
     }
 }
 
+fn terbilang_satuan(n: i64) -> &'static str {
+    match n {
+        1 => "Satu",
+        2 => "Dua",
+        3 => "Tiga",
+        4 => "Empat",
+        5 => "Lima",
+        6 => "Enam",
+        7 => "Tujuh",
+        8 => "Delapan",
+        9 => "Sembilan",
+        10 => "Sepuluh",
+        11 => "Sebelas",
+        _ => "",
+    }
+}
+
+fn terbilang_rekursif(n: i64) -> String {
+    if n <= 11 {
+        terbilang_satuan(n).to_string()
+    } else if n < 20 {
+        format!("{} Belas", terbilang_satuan(n - 10))
+    } else if n < 100 {
+        let puluhan = n / 10;
+        let sisa = n % 10;
+        if sisa == 0 {
+            format!("{} Puluh", terbilang_satuan(puluhan))
+        } else {
+            format!("{} Puluh {}", terbilang_satuan(puluhan), terbilang_satuan(sisa))
+        }
+    } else if n < 200 {
+        let sisa = n - 100;
+        if sisa == 0 {
+            "Seratus".to_string()
+        } else {
+            format!("Seratus {}", terbilang_rekursif(sisa))
+        }
+    } else if n < 1000 {
+        let ratusan = n / 100;
+        let sisa = n % 100;
+        if sisa == 0 {
+            format!("{} Ratus", terbilang_satuan(ratusan))
+        } else {
+            format!("{} Ratus {}", terbilang_satuan(ratusan), terbilang_rekursif(sisa))
+        }
+    } else if n < 2000 {
+        let sisa = n - 1000;
+        if sisa == 0 {
+            "Seribu".to_string()
+        } else {
+            format!("Seribu {}", terbilang_rekursif(sisa))
+        }
+    } else if n < 1_000_000 {
+        let ribuan = n / 1000;
+        let sisa = n % 1000;
+        if sisa == 0 {
+            format!("{} Ribu", terbilang_rekursif(ribuan))
+        } else {
+            format!("{} Ribu {}", terbilang_rekursif(ribuan), terbilang_rekursif(sisa))
+        }
+    } else if n < 1_000_000_000 {
+        let jutaan = n / 1_000_000;
+        let sisa = n % 1_000_000;
+        if sisa == 0 {
+            format!("{} Juta", terbilang_rekursif(jutaan))
+        } else {
+            format!("{} Juta {}", terbilang_rekursif(jutaan), terbilang_rekursif(sisa))
+        }
+    } else {
+        let milyaran = n / 1_000_000_000;
+        let sisa = n % 1_000_000_000;
+        if sisa == 0 {
+            format!("{} Milyar", terbilang_rekursif(milyaran))
+        } else {
+            format!("{} Milyar {}", terbilang_rekursif(milyaran), terbilang_rekursif(sisa))
+        }
+    }
+}
+
+pub fn terbilang_rupiah(n: i64) -> String {
+    if n == 0 {
+        return "Nol Rupiah".to_string();
+    }
+    let res = terbilang_rekursif(n);
+    format!("{} Rupiah", res.trim())
+}
+
 fn pad_center(text: &str, width: usize) -> String {
     if text.len() >= width {
         text[..width].to_string()
@@ -1145,7 +1257,7 @@ pub fn get_transaction_detail(
         .prepare(
             "SELECT t.id, t.invoice_number, t.order_type, u.full_name, c.name, c.phone,
                     t.subtotal, t.discount_total, t.tax_mode, t.tax_base_amount, t.tax_total,
-                    t.grand_total, t.payment_status, t.created_at
+                    t.grand_total, t.payment_status, t.created_at, c.address, c.npwp_nik, t.due_date
              FROM transactions t
              JOIN users u ON t.cashier_id = u.id
              LEFT JOIN customers c ON t.customer_id = c.id
@@ -1171,6 +1283,9 @@ pub fn get_transaction_detail(
                 r.get::<_, f64>(11)?,
                 r.get::<_, String>(12)?,
                 r.get::<_, String>(13)?,
+                r.get::<_, Option<String>>(14)?,
+                r.get::<_, Option<String>>(15)?,
+                r.get::<_, Option<String>>(16)?,
             ))
         })
         .map_err(|e| e.to_string())?;
@@ -1240,6 +1355,8 @@ pub fn get_transaction_detail(
         payments.push(p.map_err(|e| e.to_string())?);
     }
 
+    let terbilang_str = terbilang_rupiah(header.11.round() as i64);
+
     let mut detail = TransactionDetail {
         id: tx_id,
         invoice_number: header.1,
@@ -1247,6 +1364,9 @@ pub fn get_transaction_detail(
         cashier_name: header.3,
         customer_name: header.4,
         customer_phone: header.5,
+        customer_address: header.14,
+        customer_npwp_nik: header.15,
+        due_date: header.16,
         subtotal: header.6,
         discount_total: header.7,
         tax_mode: header.8,
@@ -1254,6 +1374,7 @@ pub fn get_transaction_detail(
         tax_total: header.10,
         grand_total: header.11,
         payment_status: header.12,
+        terbilang: terbilang_str,
         created_at: header.13,
         items,
         payments,
@@ -1496,4 +1617,206 @@ pub fn kick_cash_drawer() -> Result<String, String> {
     // Digunakan oleh thermal printer port RJ11 untuk membuka laci kasir
     Ok("Laci kasir (Cash Drawer) berhasil dipicu untuk terbuka.".to_string())
 }
+
+// =========================================================================
+// SPRINT 5: MODUL HILIR GROSIR (B2B, PIUTANG TEMPO, SURAT JALAN & FAKTUR PAJAK)
+// =========================================================================
+
+#[tauri::command]
+pub fn create_customer(
+    db: State<'_, Database>,
+    input: CreateCustomerInput,
+) -> Result<String, String> {
+    let conn = db.conn.lock();
+    let id = Uuid::new_v4().to_string();
+
+    conn.execute(
+        "INSERT INTO customers (id, code, name, npwp_nik, phone, address, customer_type, credit_limit, current_debt)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0.0)",
+        params![
+            id,
+            input.code,
+            input.name,
+            input.npwp_nik,
+            input.phone,
+            input.address,
+            input.customer_type,
+            input.credit_limit,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn pay_customer_debt(
+    db: State<'_, Database>,
+    customer_id: String,
+    transaction_id: Option<String>,
+    amount: f64,
+    payment_method_id: String,
+    reference_number: Option<String>,
+    notes: Option<String>,
+) -> Result<(), String> {
+    let mut conn = db.conn.lock();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let payment_id = Uuid::new_v4().to_string();
+    tx.execute(
+        "INSERT INTO customer_debt_payments (id, customer_id, transaction_id, payment_method_id, amount, reference_number, notes)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            payment_id,
+            customer_id,
+            transaction_id,
+            payment_method_id,
+            amount,
+            reference_number,
+            notes,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Kurangi saldo piutang berjalan mitra toko
+    tx.execute(
+        "UPDATE customers SET current_debt = MAX(0.0, current_debt - ?1) WHERE id = ?2",
+        params![amount, customer_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Jika pembayaran ditujukan untuk transaksi spesifik
+    if let Some(ref tid) = transaction_id {
+        tx.execute(
+            "UPDATE transactions SET payment_status = 'paid' WHERE id = ?1",
+            params![tid],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_customer_debt_history(
+    db: State<'_, Database>,
+    customer_id: String,
+) -> Result<Vec<CustomerDebtPayment>, String> {
+    let conn = db.conn.lock();
+    let mut stmt = conn
+        .prepare(
+            "SELECT cdp.id, cdp.customer_id, c.name, t.invoice_number, pm.name,
+                    cdp.amount, cdp.reference_number, cdp.notes, cdp.created_at
+             FROM customer_debt_payments cdp
+             JOIN customers c ON cdp.customer_id = c.id
+             JOIN payment_methods pm ON cdp.payment_method_id = pm.id
+             LEFT JOIN transactions t ON cdp.transaction_id = t.id
+             WHERE cdp.customer_id = ?1
+             ORDER BY cdp.created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map(params![customer_id], |r| {
+            Ok(CustomerDebtPayment {
+                id: r.get(0)?,
+                customer_id: r.get(1)?,
+                customer_name: r.get(2)?,
+                transaction_invoice: r.get(3)?,
+                payment_method_name: r.get(4)?,
+                amount: r.get(5)?,
+                reference_number: r.get(6)?,
+                notes: r.get(7)?,
+                created_at: r.get(8)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for r in rows {
+        result.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn check_customer_credit_limit(
+    db: State<'_, Database>,
+    customer_id: String,
+    additional_amount: f64,
+) -> Result<CreditCheckResult, String> {
+    let conn = db.conn.lock();
+    let mut stmt = conn
+        .prepare("SELECT name, credit_limit, current_debt FROM customers WHERE id = ?1")
+        .map_err(|e| e.to_string())?;
+
+    let mut rows = stmt
+        .query_map(params![customer_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, f64>(1)?,
+                r.get::<_, f64>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    if let Some(row) = rows.next() {
+        let (name, limit, current) = row.map_err(|e| e.to_string())?;
+        let projected = current + additional_amount;
+        let is_exceeded = limit > 0.0 && projected > limit;
+        let exceeded_by = if is_exceeded { projected - limit } else { 0.0 };
+
+        Ok(CreditCheckResult {
+            customer_id,
+            customer_name: name,
+            credit_limit: limit,
+            current_debt: current,
+            order_amount: additional_amount,
+            projected_debt: projected,
+            is_exceeded,
+            exceeded_by,
+        })
+    } else {
+        Err("Pelanggan tidak ditemukan.".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn get_delivery_order(
+    db: State<'_, Database>,
+    transaction_id: String,
+    driver_name: Option<String>,
+    vehicle_number: Option<String>,
+    notes: Option<String>,
+) -> Result<DeliveryOrderDetail, String> {
+    let detail = get_transaction_detail(db, transaction_id)?;
+    let do_num = detail.invoice_number.replace("INV/", "DO/");
+
+    let items: Vec<DeliveryOrderItem> = detail
+        .items
+        .iter()
+        .map(|i| DeliveryOrderItem {
+            product_name: i.product_name.clone(),
+            unit_name: i.unit_name.clone(),
+            quantity: i.quantity,
+        })
+        .collect();
+
+    Ok(DeliveryOrderDetail {
+        transaction_id: detail.id,
+        do_number: do_num,
+        invoice_number: detail.invoice_number,
+        customer_name: detail.customer_name.unwrap_or_else(|| "Pelanggan Umum".to_string()),
+        customer_phone: detail.customer_phone,
+        customer_address: detail.customer_address,
+        driver_name,
+        vehicle_number,
+        notes,
+        created_at: detail.created_at,
+        items,
+        store_info: detail.store_info,
+    })
+}
+
 

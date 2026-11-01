@@ -93,6 +93,60 @@ export interface Customer {
   current_debt: number;
 }
 
+export interface CreateCustomerInput {
+  code: string;
+  name: string;
+  npwp_nik?: string;
+  phone?: string;
+  address?: string;
+  customer_type: "retail" | "wholesale" | "vip";
+  credit_limit: number;
+}
+
+export interface CustomerDebtPayment {
+  id: string;
+  customer_id: string;
+  customer_name: string;
+  transaction_invoice: string | null;
+  payment_method_name: string;
+  amount: number;
+  reference_number?: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface CreditCheckResult {
+  customer_id: string;
+  customer_name: string;
+  credit_limit: number;
+  current_debt: number;
+  order_amount: number;
+  projected_debt: number;
+  is_exceeded: boolean;
+  exceeded_by: number;
+}
+
+export interface DeliveryOrderItem {
+  product_name: string;
+  unit_name: string;
+  quantity: number;
+}
+
+export interface DeliveryOrderDetail {
+  transaction_id: string;
+  do_number: string;
+  invoice_number: string;
+  customer_name: string;
+  customer_phone?: string;
+  customer_address?: string;
+  driver_name?: string;
+  vehicle_number?: string;
+  notes?: string;
+  created_at: string;
+  items: DeliveryOrderItem[];
+  store_info: StoreReceiptInfo;
+}
+
 export interface Supplier {
   id: string;
   name: string;
@@ -206,6 +260,7 @@ export interface CreateTransactionPayload {
     reference_number?: string;
   }[];
   change_due: number;
+  due_date?: string;
 }
 
 export interface TransactionHeader {
@@ -219,6 +274,7 @@ export interface TransactionHeader {
   tax_total: number;
   grand_total: number;
   payment_status: string;
+  due_date?: string | null;
   created_at: string;
 }
 
@@ -279,6 +335,9 @@ export interface TransactionDetail {
   cashier_name: string;
   customer_name?: string;
   customer_phone?: string;
+  customer_address?: string;
+  customer_npwp_nik?: string;
+  due_date?: string;
   subtotal: number;
   discount_total: number;
   tax_mode: string;
@@ -286,6 +345,7 @@ export interface TransactionDetail {
   tax_total: number;
   grand_total: number;
   payment_status: string;
+  terbilang: string;
   created_at: string;
   items: TransactionItemDetail[];
   payments: PaymentDetail[];

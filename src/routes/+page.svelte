@@ -34,6 +34,10 @@
   import ReceiptModal from "$lib/components/ReceiptModal.svelte";
   import HeldCartsModal from "$lib/components/HeldCartsModal.svelte";
   import EditQtyModal from "$lib/components/EditQtyModal.svelte";
+  import AddCustomerModal from "$lib/components/AddCustomerModal.svelte";
+  import CustomerDebtModal from "$lib/components/CustomerDebtModal.svelte";
+  import WholesaleInvoiceModal from "$lib/components/WholesaleInvoiceModal.svelte";
+  import DeliveryOrderModal from "$lib/components/DeliveryOrderModal.svelte";
 
   import { api } from "$lib/api";
   import type {
@@ -56,6 +60,8 @@
     CreateProductFullInput,
     StockAdjustmentInput,
     TransactionDetail,
+    CreateCustomerInput,
+    DeliveryOrderDetail,
   } from "$lib/types";
 
   // --- REAKTIF STATE (SVELTE 5 RUNES) ---
@@ -90,6 +96,9 @@
   let selectedCartIndex = $state<number>(0);
   let heldCarts = $state<{ id: string; name: string; items: CartItem[]; time: string }[]>([]);
   let selectedWholesaleCustomerId = $state<string | null>(null);
+  let selectedWholesaleCustomer = $derived(
+    customers.find((c) => c.id === selectedWholesaleCustomerId) || null
+  );
 
   // Modals & Subtabs State
   let isPaymentModalOpen = $state(false);
@@ -102,7 +111,20 @@
   let activeReceiptDetail = $state<TransactionDetail | null>(null);
   let isHeldCartsModalOpen = $state(false);
   let isEditQtyModalOpen = $state(false);
+  let isAddCustomerModalOpen = $state(false);
+  let isCustomerDebtModalOpen = $state(false);
+  let selectedDebtCustomer = $state<Customer | null>(null);
+  let isWholesaleInvoiceModalOpen = $state(false);
+  let isDeliveryOrderModalOpen = $state(false);
   let procurementSubTab = $state<"po" | "suppliers" | "debt">("po");
+  let customerSubTab = $state<"list" | "receivables">("list");
+
+  let wholesaleRecentTransactions = $derived(
+    recentTransactions.filter((t) => t.order_type === "wholesale")
+  );
+  let unpaidCustomerList = $derived(
+    customers.filter((c) => c.current_debt > 0)
+  );
 
   // Input Field References
   let searchInputRef = $state<HTMLInputElement | null>(null);
@@ -222,7 +244,11 @@
         isStockOpnameModalOpen ||
         isReceiptModalOpen ||
         isHeldCartsModalOpen ||
-        isEditQtyModalOpen;
+        isEditQtyModalOpen ||
+        isAddCustomerModalOpen ||
+        isCustomerDebtModalOpen ||
+        isWholesaleInvoiceModalOpen ||
+        isDeliveryOrderModalOpen;
 
       // ESC: Menutup dialog aktif
       if (e.key === "Escape") {
@@ -236,6 +262,22 @@
         }
         if (isEditQtyModalOpen) {
           isEditQtyModalOpen = false;
+          return;
+        }
+        if (isAddCustomerModalOpen) {
+          isAddCustomerModalOpen = false;
+          return;
+        }
+        if (isCustomerDebtModalOpen) {
+          isCustomerDebtModalOpen = false;
+          return;
+        }
+        if (isWholesaleInvoiceModalOpen) {
+          isWholesaleInvoiceModalOpen = false;
+          return;
+        }
+        if (isDeliveryOrderModalOpen) {
+          isDeliveryOrderModalOpen = false;
           return;
         }
       }
@@ -628,11 +670,57 @@
     }
   }
 
-  // --- TRANSAKSI CHECKOUT ---
-  async function handleConfirmPayment(methodId: string, amountPaid: number, changeDue: number) {
+  async function openWholesaleInvoice(idOrInvoice: string) {
     try {
+      const detail = await api.getTransactionDetail(idOrInvoice);
+      activeReceiptDetail = detail;
+      isWholesaleInvoiceModalOpen = true;
+    } catch (err) {
+      showToast(`Gagal memuat faktur A4: ${err}`);
+    }
+  }
+
+  async function openDeliveryOrder(idOrInvoice: string) {
+    try {
+      const detail = await api.getTransactionDetail(idOrInvoice);
+      activeReceiptDetail = detail;
+      isDeliveryOrderModalOpen = true;
+    } catch (err) {
+      showToast(`Gagal memuat surat jalan: ${err}`);
+    }
+  }
+
+  // --- SPRINT 5: HANDLER MITRA GROSIR & PIUTANG ---
+  async function handleCreateCustomer(input: CreateCustomerInput) {
+    try {
+      await api.createCustomer(input);
+      customers = await api.getCustomers();
+      isAddCustomerModalOpen = false;
+      showToast(`Pelanggan '${input.name}' berhasil didaftarkan!`);
+    } catch (err) {
+      showToast(`Gagal menambah pelanggan: ${err}`);
+    }
+  }
+
+  function handleOpenDebtModal(cust: Customer) {
+    selectedDebtCustomer = cust;
+    isCustomerDebtModalOpen = true;
+  }
+
+  async function handleCustomerPaymentSuccess() {
+    isCustomerDebtModalOpen = false;
+    customers = await api.getCustomers();
+    recentTransactions = await api.getRecentTransactions();
+    dashboardStats = await api.getDashboardStats();
+    showToast("Pelunasan piutang mitra toko berhasil disimpan!");
+  }
+
+  // --- TRANSAKSI CHECKOUT ---
+  async function handleConfirmPayment(methodId: string, amountPaid: number, changeDue: number, dueDate?: string) {
+    try {
+      const isWholesale = activeTab === "wholesale";
       const payload = {
-        order_type: (activeTab === "wholesale" ? "wholesale" : "retail") as "retail" | "wholesale",
+        order_type: (isWholesale ? "wholesale" : "retail") as "retail" | "wholesale",
         customer_id: selectedWholesaleCustomerId,
         cashier_id: currentShift?.cashier_id || "u0000000-0000-0000-0000-000000000002",
         shift_id: currentShift?.id || null,
@@ -653,31 +741,37 @@
           is_taxable: i.product.is_taxable,
           subtotal: i.subtotal,
         })),
-        payments: [
+        payments: amountPaid > 0 ? [
           {
             payment_method_id: methodId,
             amount_paid: amountPaid,
           },
-        ],
+        ] : [],
         change_due: changeDue,
+        due_date: dueDate,
       };
 
       const invoiceNum = await api.createTransaction(payload);
       isPaymentModalOpen = false;
       cart = [];
-      showToast(`Transaksi ${invoiceNum} Berhasil!`);
+      showToast(`Transaksi ${invoiceNum} Berhasil Disimpan!`);
 
-      // Buka otomatis Struk Thermal Preview
+      // Buka pratinjau dokumen sesuai tipe penjualan
       try {
         const detail = await api.getTransactionDetail(invoiceNum);
         activeReceiptDetail = detail;
-        isReceiptModalOpen = true;
+        if (isWholesale) {
+          isWholesaleInvoiceModalOpen = true; // Langsung tampilkan Faktur A4 untuk Grosir B2B
+        } else {
+          isReceiptModalOpen = true; // Struk thermal untuk Retail
+        }
       } catch (e) {
-        console.warn("Gagal membuka struk transaksi otomatis:", e);
+        console.warn("Gagal membuka dokumen otomatis:", e);
       }
 
-      // Refresh data produk untuk stok terkini
+      // Refresh data
       products = await api.getProducts();
+      customers = await api.getCustomers();
       recentTransactions = await api.getRecentTransactions();
       dashboardStats = await api.getDashboardStats();
     } catch (err) {
@@ -1048,12 +1142,12 @@
                 <p class="text-xs text-slate-500">Pilih mitra toko rekanan untuk faktur tempo atau harga volume kartonan</p>
               </div>
 
-              <!-- Pemilih Pelanggan Mitra -->
+              <!-- Pemilih Pelanggan Mitra & Tambah Baru -->
               <div class="flex items-center gap-2">
                 <span class="text-xs font-semibold text-slate-700">Mitra Toko:</span>
                 <select
                   bind:value={selectedWholesaleCustomerId}
-                  class="text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-semibold text-slate-800"
+                  class="text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 >
                   <option value={null}>-- Pilih Pelanggan B2B --</option>
                   {#each customers as c}
@@ -1062,8 +1156,47 @@
                     </option>
                   {/each}
                 </select>
+                <button
+                  type="button"
+                  onclick={() => (isAddCustomerModalOpen = true)}
+                  class="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs active:scale-95"
+                >
+                  <Plus class="w-3.5 h-3.5" />
+                  <span>Mitra Baru</span>
+                </button>
               </div>
             </div>
+
+            <!-- Jika ada Mitra yang dipilih, tampilkan ringkasan Plafon & Piutang Berjalan -->
+            {#if selectedWholesaleCustomer}
+              {@const sisaPlafon = selectedWholesaleCustomer.credit_limit - selectedWholesaleCustomer.current_debt}
+              <div class="bg-emerald-50/60 border border-emerald-200 rounded-lg p-3 grid grid-cols-1 md:grid-cols-4 gap-3 text-xs shadow-xs">
+                <div>
+                  <span class="text-slate-500 block text-[11px]">Mitra Terpilih</span>
+                  <span class="font-bold text-slate-900">{selectedWholesaleCustomer.name} ({selectedWholesaleCustomer.code})</span>
+                  <span class="text-[11px] text-slate-500 block">{selectedWholesaleCustomer.phone || "-"}</span>
+                </div>
+                <div>
+                  <span class="text-slate-500 block text-[11px]">Plafon Kredit</span>
+                  <span class="font-bold font-mono text-slate-800">Rp {selectedWholesaleCustomer.credit_limit.toLocaleString("id-ID")}</span>
+                </div>
+                <div>
+                  <span class="text-slate-500 block text-[11px]">Piutang Berjalan</span>
+                  <span class="font-bold font-mono {selectedWholesaleCustomer.current_debt > 0 ? 'text-rose-600' : 'text-slate-700'}">
+                    Rp {selectedWholesaleCustomer.current_debt.toLocaleString("id-ID")}
+                  </span>
+                </div>
+                <div>
+                  <span class="text-slate-500 block text-[11px]">Sisa Plafon</span>
+                  <span class="font-bold font-mono {sisaPlafon > 0 ? 'text-emerald-700' : 'text-rose-600'}">
+                    Rp {sisaPlafon.toLocaleString("id-ID")}
+                    {#if sisaPlafon <= 0}
+                      <span class="text-[10px] ml-1 px-1 bg-rose-100 text-rose-700 rounded font-bold">TERLAMPAUI</span>
+                    {/if}
+                  </span>
+                </div>
+              </div>
+            {/if}
 
             <!-- Tabel Matrix Produk & Tier Grosir -->
             <div class="flex-1 bg-white border border-slate-200 rounded-lg overflow-auto shadow-xs">
@@ -1109,6 +1242,70 @@
                 </tbody>
               </table>
             </div>
+
+            <!-- Riwayat Order Grosir & Cetak Dokumen A4 (Faktur Pajak & Surat Jalan) -->
+            {#if wholesaleRecentTransactions.length > 0}
+              <div class="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden shrink-0">
+                <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                  <span class="font-bold text-xs text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                    <FileSpreadsheet class="w-3.5 h-3.5 text-emerald-600" />
+                    Pesanan Grosir B2B Terakhir
+                  </span>
+                  <span class="text-[11px] text-slate-500">{wholesaleRecentTransactions.length} Faktur</span>
+                </div>
+                <div class="max-h-48 overflow-y-auto">
+                  <table class="w-full text-left text-xs border-collapse">
+                    <thead class="bg-slate-100 text-slate-600 border-b border-slate-200 uppercase font-semibold sticky top-0">
+                      <tr>
+                        <th class="py-2 px-3">No Faktur</th>
+                        <th class="py-2 px-3">Pelanggan B2B</th>
+                        <th class="py-2 px-3 text-right">Total Transaksi</th>
+                        <th class="py-2 px-3 text-center">Status Bayar</th>
+                        <th class="py-2 px-3 text-center">Jatuh Tempo</th>
+                        <th class="py-2 px-3 text-center">Cetak Dokumen A4</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 text-slate-800">
+                      {#each wholesaleRecentTransactions as tx}
+                        <tr class="hover:bg-slate-50">
+                          <td class="py-2 px-3 font-mono font-bold text-slate-900">{tx.invoice_number}</td>
+                          <td class="py-2 px-3 font-semibold text-slate-800">{tx.customer_name || "Umum"}</td>
+                          <td class="py-2 px-3 text-right font-mono font-bold text-emerald-700">Rp {tx.grand_total.toLocaleString("id-ID")}</td>
+                          <td class="py-2 px-3 text-center">
+                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase {tx.payment_status === 'paid' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : tx.payment_status === 'partial' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}">
+                              {tx.payment_status === 'paid' ? 'Lunas' : tx.payment_status === 'partial' ? 'DP / Sebagian' : 'Tempo (Hutang)'}
+                            </span>
+                          </td>
+                          <td class="py-2 px-3 text-center font-mono text-[11px] text-slate-600">{tx.due_date || "-"}</td>
+                          <td class="py-2 px-3 text-center">
+                            <div class="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onclick={() => openWholesaleInvoice(tx.invoice_number)}
+                                class="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                                title="Buka Faktur Penjualan & Pajak A4"
+                              >
+                                <Printer class="w-3 h-3 text-emerald-700" />
+                                <span>Faktur A4</span>
+                              </button>
+                              <button
+                                type="button"
+                                onclick={() => openDeliveryOrder(tx.invoice_number)}
+                                class="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-300 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                                title="Buka Surat Jalan (DO) Pengiriman"
+                              >
+                                <Truck class="w-3 h-3 text-blue-700" />
+                                <span>Surat Jalan</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            {/if}
           </div>
 
         <!-- TAB 3: INVENTARIS & MULTI-SATUAN -->
@@ -1396,46 +1593,191 @@
         <!-- TAB 5: PELANGGAN & PIUTANG -->
         {:else if activeTab === "customers"}
           <div class="p-4 flex-1 flex flex-col gap-3 overflow-hidden">
+            <!-- Header Toolbar & Subtabs -->
             <div class="bg-white border border-slate-200 rounded-lg p-3 flex justify-between items-center shadow-xs">
-              <div>
-                <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <Users class="w-4 h-4 text-emerald-600" />
-                  <span>Database Pelanggan & Plafon Piutang (Kredit Limit)</span>
-                </h2>
-                <p class="text-xs text-slate-500">Pelacakan batas kredit pelanggan grosir dan saldo piutang berjalan</p>
+              <div class="flex items-center gap-4">
+                <div>
+                  <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Users class="w-4 h-4 text-emerald-600" />
+                    <span>Database Pelanggan & Plafon Piutang (Kredit Limit)</span>
+                  </h2>
+                  <p class="text-[11px] text-slate-500">Pelacakan batas kredit pelanggan grosir, jatuh tempo, dan pelunasan piutang</p>
+                </div>
+
+                <!-- Subtab Pills -->
+                <div class="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onclick={() => (customerSubTab = "list")}
+                    class="px-3 py-1 rounded-md transition-colors {customerSubTab === 'list' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
+                  >
+                    Semua Pelanggan ({customers.length})
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => (customerSubTab = "receivables")}
+                    class="px-3 py-1 rounded-md transition-colors {customerSubTab === 'receivables' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
+                  >
+                    Piutang Tempo Berjalan ({unpaidCustomerList.length})
+                  </button>
+                </div>
               </div>
+
+              <!-- Tombol Aksi Tambah Pelanggan -->
+              <button
+                type="button"
+                onclick={() => (isAddCustomerModalOpen = true)}
+                class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs active:scale-95"
+              >
+                <Plus class="w-4 h-4" />
+                <span>Tambah Pelanggan Baru</span>
+              </button>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {#each customers as c}
-                <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-xs space-y-2">
-                  <div class="flex justify-between items-start">
-                    <div>
-                      <div class="flex items-center gap-2">
-                        <h3 class="font-bold text-slate-900 text-sm">{c.name}</h3>
-                        <span class="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded {c.customer_type === 'wholesale' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-slate-100 text-slate-600'}">
-                          {c.customer_type}
-                        </span>
+            <!-- Konten Subtab 1: Grid Kartu Semua Pelanggan -->
+            {#if customerSubTab === "list"}
+              <div class="flex-1 overflow-y-auto">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {#each customers as c}
+                    {@const debtRatio = c.credit_limit > 0 ? Math.min(100, Math.round((c.current_debt / c.credit_limit) * 100)) : 0}
+                    {@const sisaPlafon = c.credit_limit - c.current_debt}
+                    <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-xs space-y-3 flex flex-col justify-between">
+                      <div>
+                        <div class="flex justify-between items-start">
+                          <div>
+                            <div class="flex items-center gap-1.5">
+                              <h3 class="font-bold text-slate-900 text-sm">{c.name}</h3>
+                              <span class="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded {c.customer_type === 'wholesale' ? 'bg-blue-50 text-blue-700 border border-blue-200' : c.customer_type === 'vip' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-600'}">
+                                {c.customer_type}
+                              </span>
+                            </div>
+                            <p class="text-xs text-slate-500 font-mono">Kode: {c.code}</p>
+                          </div>
+                        </div>
+
+                        <div class="text-xs text-slate-600 space-y-1 pt-2.5 border-t border-slate-100">
+                          <div class="flex justify-between">
+                            <span class="text-slate-500">Telepon:</span>
+                            <span class="font-mono text-slate-800">{c.phone || "-"}</span>
+                          </div>
+                          {#if c.npwp_nik}
+                            <div class="flex justify-between">
+                              <span class="text-slate-500">NPWP / NIK:</span>
+                              <span class="font-mono text-slate-800">{c.npwp_nik}</span>
+                            </div>
+                          {/if}
+                          {#if c.address}
+                            <div class="text-[11px] text-slate-500 truncate" title={c.address}>
+                              Alamat: {c.address}
+                            </div>
+                          {/if}
+
+                          <!-- Plafon & Pemakaian -->
+                          <div class="pt-2 border-t border-slate-100 space-y-1">
+                            <div class="flex justify-between items-baseline text-xs">
+                              <span class="text-slate-500">Plafon Kredit:</span>
+                              <span class="font-bold font-mono text-slate-800">Rp {c.credit_limit.toLocaleString("id-ID")}</span>
+                            </div>
+                            <div class="flex justify-between items-baseline text-xs">
+                              <span class="text-slate-500">Piutang Berjalan:</span>
+                              <span class="font-bold font-mono {c.current_debt > 0 ? 'text-rose-600' : 'text-emerald-700'}">
+                                Rp {c.current_debt.toLocaleString("id-ID")}
+                              </span>
+                            </div>
+                            <div class="flex justify-between items-baseline text-xs">
+                              <span class="text-slate-500">Sisa Plafon:</span>
+                              <span class="font-bold font-mono {sisaPlafon > 0 ? 'text-emerald-700' : 'text-rose-600'}">
+                                Rp {sisaPlafon.toLocaleString("id-ID")}
+                              </span>
+                            </div>
+
+                            <!-- Progress Bar Plafon -->
+                            <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden mt-1.5">
+                              <div
+                                class="h-full rounded-full transition-all {debtRatio >= 90 ? 'bg-rose-500' : debtRatio >= 60 ? 'bg-amber-500' : 'bg-emerald-500'}"
+                                style="width: {debtRatio}%"
+                              ></div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                      <p class="text-xs text-slate-500 font-mono">Kode: {c.code}</p>
+
+                      <!-- Tombol Pelunasan jika ada piutang -->
+                      <div class="pt-2 border-t border-slate-100 flex justify-between items-center">
+                        <span class="text-[11px] text-slate-500">
+                          {c.current_debt > 0 ? `Terpakai: ${debtRatio}%` : 'Lunas / Nihil'}
+                        </span>
+                        {#if c.current_debt > 0}
+                          <button
+                            type="button"
+                            onclick={() => handleOpenDebtModal(c)}
+                            class="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded text-xs font-semibold shadow-2xs active:scale-95 transition-colors"
+                          >
+                            Catat Pelunasan
+                          </button>
+                        {:else}
+                          <span class="text-[11px] text-emerald-700 font-medium">Bebas Piutang</span>
+                        {/if}
+                      </div>
                     </div>
-                  </div>
-                  <div class="text-xs text-slate-600 space-y-1 pt-2 border-t border-slate-100">
-                    <div>Kontak: <span class="font-mono text-slate-900">{c.phone || "-"}</span></div>
-                    <div class="flex justify-between items-baseline pt-1">
-                      <span>Plafon Kredit:</span>
-                      <span class="font-bold font-mono text-slate-800">Rp {c.credit_limit.toLocaleString("id-ID")}</span>
-                    </div>
-                    <div class="flex justify-between items-baseline">
-                      <span>Sisa Piutang Berjalan:</span>
-                      <span class="font-bold font-mono {c.current_debt > 0 ? 'text-rose-600' : 'text-emerald-700'}">
-                        Rp {c.current_debt.toLocaleString("id-ID")}
-                      </span>
-                    </div>
-                  </div>
+                  {/each}
                 </div>
-              {/each}
-            </div>
+              </div>
+
+            <!-- Konten Subtab 2: Tabel Piutang Tempo Berjalan -->
+            {:else if customerSubTab === "receivables"}
+              <div class="flex-1 bg-white border border-slate-200 rounded-lg overflow-auto shadow-xs">
+                <table class="w-full text-left text-xs border-collapse">
+                  <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-semibold sticky top-0">
+                    <tr>
+                      <th class="py-2.5 px-3">Kode</th>
+                      <th class="py-2.5 px-3">Nama Mitra Pelanggan</th>
+                      <th class="py-2.5 px-3">No Telepon</th>
+                      <th class="py-2.5 px-3">NPWP / NIK</th>
+                      <th class="py-2.5 px-3 text-right">Plafon Kredit</th>
+                      <th class="py-2.5 px-3 text-right">Saldo Piutang Berjalan</th>
+                      <th class="py-2.5 px-3 text-right">Sisa Plafon</th>
+                      <th class="py-2.5 px-3 text-center">Aksi Pelunasan</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 text-slate-800">
+                    {#if unpaidCustomerList.length === 0}
+                      <tr>
+                        <td colspan="8" class="text-center py-12 text-slate-400">
+                          Tidak ada piutang tempo yang berjalan. Semua tagihan mitra toko tertib lunas!
+                        </td>
+                      </tr>
+                    {:else}
+                      {#each unpaidCustomerList as c}
+                        {@const sisa = c.credit_limit - c.current_debt}
+                        <tr class="hover:bg-slate-50">
+                          <td class="py-2.5 px-3 font-mono font-bold text-slate-900">{c.code}</td>
+                          <td class="py-2.5 px-3 font-semibold text-slate-800">{c.name}</td>
+                          <td class="py-2.5 px-3 font-mono text-slate-600">{c.phone || "-"}</td>
+                          <td class="py-2.5 px-3 font-mono text-slate-500">{c.npwp_nik || "-"}</td>
+                          <td class="py-2.5 px-3 text-right font-mono">Rp {c.credit_limit.toLocaleString("id-ID")}</td>
+                          <td class="py-2.5 px-3 text-right font-mono font-bold text-rose-600">
+                            Rp {c.current_debt.toLocaleString("id-ID")}
+                          </td>
+                          <td class="py-2.5 px-3 text-right font-mono font-bold {sisa > 0 ? 'text-emerald-700' : 'text-rose-700'}">
+                            Rp {sisa.toLocaleString("id-ID")}
+                          </td>
+                          <td class="py-2.5 px-3 text-center">
+                            <button
+                              type="button"
+                              onclick={() => handleOpenDebtModal(c)}
+                              class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[11px] shadow-xs active:scale-95"
+                            >
+                              Catat Pelunasan
+                            </button>
+                          </td>
+                        </tr>
+                      {/each}
+                    {/if}
+                  </tbody>
+                </table>
+              </div>
+            {/if}
           </div>
 
         <!-- TAB 6: LAPORAN & PERPAJAKAN -->
@@ -1725,6 +2067,8 @@
     {taxTotal}
     {taxMode}
     {paymentMethods}
+    orderType={activeTab === "wholesale" ? "wholesale" : "retail"}
+    customer={selectedWholesaleCustomer}
     onClose={() => (isPaymentModalOpen = false)}
     onConfirmPayment={handleConfirmPayment}
   />
@@ -1793,5 +2137,35 @@
     item={cart[selectedCartIndex] || null}
     onClose={() => (isEditQtyModalOpen = false)}
     onSaveQty={handleSaveEditedQty}
+  />
+
+  <!-- MODAL TAMBAH PELANGGAN / MITRA GROSIR (SPRINT 5) -->
+  <AddCustomerModal
+    isOpen={isAddCustomerModalOpen}
+    onClose={() => (isAddCustomerModalOpen = false)}
+    onSubmit={handleCreateCustomer}
+  />
+
+  <!-- MODAL BUKU PEMBANTU PIUTANG & CATAT PELUNASAN (SPRINT 5) -->
+  <CustomerDebtModal
+    isOpen={isCustomerDebtModalOpen}
+    customer={selectedDebtCustomer}
+    {paymentMethods}
+    onClose={() => (isCustomerDebtModalOpen = false)}
+    onPaymentSuccess={handleCustomerPaymentSuccess}
+  />
+
+  <!-- MODAL FAKTUR PENJUALAN & PAJAK A4 (SPRINT 5) -->
+  <WholesaleInvoiceModal
+    isOpen={isWholesaleInvoiceModalOpen}
+    transaction={activeReceiptDetail}
+    onClose={() => (isWholesaleInvoiceModalOpen = false)}
+  />
+
+  <!-- MODAL SURAT JALAN / DELIVERY ORDER A4 (SPRINT 5) -->
+  <DeliveryOrderModal
+    isOpen={isDeliveryOrderModalOpen}
+    transaction={activeReceiptDetail}
+    onClose={() => (isDeliveryOrderModalOpen = false)}
   />
 </div>

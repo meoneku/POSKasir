@@ -223,6 +223,17 @@ CREATE TABLE IF NOT EXISTS payments (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS customer_debt_payments (
+    id TEXT PRIMARY KEY,
+    customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    transaction_id TEXT REFERENCES transactions(id),
+    payment_method_id TEXT NOT NULL REFERENCES payment_methods(id),
+    amount REAL NOT NULL,
+    reference_number TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 10. Mutasi Stok Antar Cabang
 CREATE TABLE IF NOT EXISTS inter_branch_transfers (
     id TEXT PRIMARY KEY,

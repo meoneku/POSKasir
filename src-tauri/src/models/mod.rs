@@ -129,6 +129,65 @@ pub struct Customer {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateCustomerInput {
+    pub code: String,
+    pub name: String,
+    pub npwp_nik: Option<String>,
+    pub phone: Option<String>,
+    pub address: Option<String>,
+    pub customer_type: String, // 'retail', 'wholesale', 'vip'
+    pub credit_limit: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CustomerDebtPayment {
+    pub id: String,
+    pub customer_id: String,
+    pub customer_name: String,
+    pub transaction_invoice: Option<String>,
+    pub payment_method_name: String,
+    pub amount: f64,
+    pub reference_number: Option<String>,
+    pub notes: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreditCheckResult {
+    pub customer_id: String,
+    pub customer_name: String,
+    pub credit_limit: f64,
+    pub current_debt: f64,
+    pub order_amount: f64,
+    pub projected_debt: f64,
+    pub is_exceeded: bool,
+    pub exceeded_by: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DeliveryOrderItem {
+    pub product_name: String,
+    pub unit_name: String,
+    pub quantity: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DeliveryOrderDetail {
+    pub transaction_id: String,
+    pub do_number: String,
+    pub invoice_number: String,
+    pub customer_name: String,
+    pub customer_phone: Option<String>,
+    pub customer_address: Option<String>,
+    pub driver_name: Option<String>,
+    pub vehicle_number: Option<String>,
+    pub notes: Option<String>,
+    pub created_at: String,
+    pub items: Vec<DeliveryOrderItem>,
+    pub store_info: StoreReceiptInfo,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Supplier {
     pub id: String,
     pub name: String,
@@ -209,6 +268,7 @@ pub struct CreateTransactionInput {
     pub items: Vec<CartItemInput>,
     pub payments: Vec<PaymentInput>,
     pub change_due: f64,
+    pub due_date: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -223,6 +283,7 @@ pub struct TransactionHeader {
     pub tax_total: f64,
     pub grand_total: f64,
     pub payment_status: String,
+    pub due_date: Option<String>,
     pub created_at: String,
 }
 
@@ -321,6 +382,9 @@ pub struct TransactionDetail {
     pub cashier_name: String,
     pub customer_name: Option<String>,
     pub customer_phone: Option<String>,
+    pub customer_address: Option<String>,
+    pub customer_npwp_nik: Option<String>,
+    pub due_date: Option<String>,
     pub subtotal: f64,
     pub discount_total: f64,
     pub tax_mode: String,
@@ -328,6 +392,7 @@ pub struct TransactionDetail {
     pub tax_total: f64,
     pub grand_total: f64,
     pub payment_status: String,
+    pub terbilang: String,
     pub created_at: String,
     pub items: Vec<TransactionItemDetail>,
     pub payments: Vec<PaymentDetail>,

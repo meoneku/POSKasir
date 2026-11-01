@@ -86,6 +86,6 @@ Setiap AI Agent yang membuat atau memodifikasi kode **WAJIB MEMATUHI ATURAN INI*
 - [x] **Sprint 2**: Embedded Server Kasir Lokal (Axum + mDNS + WebSocket Sync)
 - [x] **Sprint 3**: Modul Hulu (Pemasok, PO, Penerimaan Barang, Multi-Satuan & Harga)
 - [x] **Sprint 4**: Modul Hilir Retail (Kasir Cepat, Barcode, Struk Thermal, Cash Drawer, Shift)
-- [ ] **Sprint 5**: Modul Hilir Grosir (Pelanggan B2B, Piutang Tempo, Surat Jalan, Faktur Pajak)
+- [x] **Sprint 5**: Modul Hilir Grosir (Pelanggan B2B, Piutang Tempo, Surat Jalan, Faktur Pajak)
 - [ ] **Sprint 6**: Modul Multi-Cabang & Sinkronisasi (Mutasi Stok Antar Cabang, Cloud Relay / Mesh VPN Sync)
 - [ ] **Sprint 7**: Build & Packaging Multi-Platform (NSIS Windows, Linux .deb/.rpm/pacman, macOS .dmg)

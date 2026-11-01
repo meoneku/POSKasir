@@ -20,6 +20,10 @@ import type {
   StockAdjustmentInput,
   TransactionDetail,
   ShiftReport,
+  CreateCustomerInput,
+  CustomerDebtPayment,
+  CreditCheckResult,
+  DeliveryOrderDetail,
 } from "./types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -355,6 +359,9 @@ export const api = {
         cashier_name: "Kasir Utama (Budi)",
         customer_name: "Pelanggan Umum",
         customer_phone: undefined,
+        customer_address: "Jl. Melati No. 45, Jakarta",
+        customer_npwp_nik: "09.123.456.7-001.000",
+        due_date: undefined,
         subtotal: 70000,
         discount_total: 0,
         tax_mode: "inclusive",
@@ -362,6 +369,7 @@ export const api = {
         tax_total: 6937,
         grand_total: 70000,
         payment_status: "paid",
+        terbilang: "Tujuh Puluh Ribu Rupiah",
         created_at: new Date().toISOString(),
         items: [
           {
@@ -431,6 +439,94 @@ export const api = {
   async kickCashDrawer(): Promise<string> {
     if (!isTauri) return "Laci kasir berhasil dipicu.";
     return invoke("kick_cash_drawer");
+  },
+
+  async createCustomer(input: CreateCustomerInput): Promise<string> {
+    if (!isTauri) return "cust-mock";
+    return invoke("create_customer", { input });
+  },
+
+  async payCustomerDebt(
+    customerId: string,
+    transactionId: string | null,
+    amount: number,
+    paymentMethodId: string,
+    referenceNumber?: string,
+    notes?: string
+  ): Promise<void> {
+    if (!isTauri) return;
+    return invoke("pay_customer_debt", {
+      customerId,
+      transactionId,
+      amount,
+      paymentMethodId,
+      referenceNumber,
+      notes,
+    });
+  },
+
+  async getCustomerDebtHistory(customerId: string): Promise<CustomerDebtPayment[]> {
+    if (!isTauri) return [];
+    return invoke("get_customer_debt_history", { customerId });
+  },
+
+  async checkCustomerCreditLimit(
+    customerId: string,
+    additionalAmount: number
+  ): Promise<CreditCheckResult> {
+    if (!isTauri) {
+      return {
+        customer_id: customerId,
+        customer_name: "Toko Berkah Sejahtera",
+        credit_limit: 15000000,
+        current_debt: 2500000,
+        order_amount: additionalAmount,
+        projected_debt: 2500000 + additionalAmount,
+        is_exceeded: 2500000 + additionalAmount > 15000000,
+        exceeded_by: Math.max(0, 2500000 + additionalAmount - 15000000),
+      };
+    }
+    return invoke("check_customer_credit_limit", { customerId, additionalAmount });
+  },
+
+  async getDeliveryOrder(
+    transactionId: string,
+    driverName?: string,
+    vehicleNumber?: string,
+    notes?: string
+  ): Promise<DeliveryOrderDetail> {
+    if (!isTauri) {
+      return {
+        transaction_id: transactionId,
+        do_number: "DO/20261101/001",
+        invoice_number: "INV/20261101/001",
+        customer_name: "Toko Berkah Sejahtera",
+        customer_phone: "081399887766",
+        customer_address: "Pasar Baru No 12, Jakarta Pusat",
+        driver_name: driverName || "Pak Joko",
+        vehicle_number: vehicleNumber || "B 1234 XYZ",
+        notes: notes || "Harap sertakan stempel toko saat penerimaan",
+        created_at: new Date().toISOString(),
+        items: [
+          { product_name: "Minyak Goreng 2L", unit_name: "Dus (6 Pouch)", quantity: 10 },
+          { product_name: "Beras Pandan Wangi 5kg", unit_name: "Sak", quantity: 20 },
+        ],
+        store_info: {
+          name: "BERKAH POS KASIR",
+          branch: "Kantor Pusat",
+          address: "Jl. Perdagangan Niaga No. 88, Jakarta",
+          phone: "0812-3456-7890",
+          npwp: "01.234.567.8-901.000",
+          footer: "",
+        },
+      };
+    }
+    return invoke("get_delivery_order", {
+      transactionId,
+      driverName,
+      vehicleNumber,
+      notes,
+    });
   },
 
   initWebSocket(hostIp: string, port: number, onMessage: (event: WsEvent) => void): () => void {
