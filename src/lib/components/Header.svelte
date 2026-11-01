@@ -1,21 +1,27 @@
 <script lang="ts">
-  import { Store, User, Clock, ShieldCheck, Wifi, Radio } from "@lucide/svelte";
-  import type { Shift, ServerInfo } from "$lib/types";
+  import { Store, User, Clock, ShieldCheck, Lock, LogOut, KeyRound } from "@lucide/svelte";
+  import type { Shift, ServerInfo, UserSession } from "$lib/types";
 
   interface Props {
     storeName?: string;
     branchName?: string;
     shift: Shift | null;
+    currentUser: UserSession | null;
     serverInfo?: ServerInfo | null;
     onOpenShiftModal: () => void;
+    onLockScreen: () => void;
+    onLogout: () => void;
   }
 
   let {
     storeName = "BERKAH POS KASIR",
     branchName = "Kantor Pusat",
     shift = null,
+    currentUser = null,
     serverInfo = null,
     onOpenShiftModal,
+    onLockScreen,
+    onLogout,
   }: Props = $props();
 
   let timeString = $state("");
@@ -69,8 +75,8 @@
     </div>
   </div>
 
-  <!-- Sisi Kanan: Status Shift, Jam, Profil Kasir -->
-  <div class="flex items-center gap-3">
+  <!-- Sisi Kanan: Status Shift, Jam, Profil Kasir & Tombol Kunci -->
+  <div class="flex items-center gap-2.5">
     <!-- Tombol Shift Kasir -->
     <button
       onclick={onOpenShiftModal}
@@ -91,22 +97,44 @@
       <span class="font-mono font-medium">{timeString || "00:00:00"}</span>
     </div>
 
-    <!-- Kasir Aktif (Klik untuk ganti kasir / kelola shift) -->
+    <!-- Tombol Kunci Layar (Lock Screen) -->
+    <button
+      type="button"
+      onclick={onLockScreen}
+      title="Kunci Layar Kasir Sementara (Membutuhkan PIN untuk membuka)"
+      class="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 border border-slate-200 transition-colors"
+    >
+      <Lock class="w-3.5 h-3.5" />
+    </button>
+
+    <!-- Profil Pengguna Aktif (Klik untuk kelola shift / profil) -->
     <button
       type="button"
       onclick={onOpenShiftModal}
-      title="Klik untuk melihat shift atau ganti kasir bertugas"
+      title="Profil pengguna bertugas. Klik untuk melihat shift."
       class="flex items-center gap-2 pl-2 border-l border-slate-200 hover:opacity-85 transition-opacity text-left cursor-pointer group"
     >
-      <div class="w-7 h-7 rounded-full bg-slate-100 group-hover:bg-emerald-50 border border-slate-300 group-hover:border-emerald-400 flex items-center justify-center text-slate-700 group-hover:text-emerald-700 transition-colors">
-        <User class="w-3.5 h-3.5" />
+      <div class="w-7 h-7 rounded-full {currentUser?.role === 'admin' ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-emerald-100 text-emerald-800 border-emerald-300'} border flex items-center justify-center font-bold text-xs">
+        {(currentUser?.full_name || shift?.cashier_name || "K").slice(0, 1).toUpperCase()}
       </div>
       <div class="text-left hidden md:block">
         <div class="text-xs font-semibold text-slate-900 group-hover:text-emerald-800 leading-tight">
-          {shift?.cashier_name || "Kasir Utama"}
+          {currentUser?.full_name || shift?.cashier_name || "Kasir Utama"}
         </div>
-        <div class="text-[10px] text-slate-500 capitalize">Operator Kasir (Ganti)</div>
+        <div class="text-[10px] text-slate-500 capitalize flex items-center gap-1">
+          <span>{currentUser?.role === 'admin' ? 'Superadmin' : currentUser?.role === 'supervisor' ? 'Supervisor' : 'Kasir'}</span>
+        </div>
       </div>
+    </button>
+
+    <!-- Tombol Logout -->
+    <button
+      type="button"
+      onclick={onLogout}
+      title="Keluar dari akun (Logout)"
+      class="p-2 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 transition-colors"
+    >
+      <LogOut class="w-3.5 h-3.5" />
     </button>
   </div>
 </header>

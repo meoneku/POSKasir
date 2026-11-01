@@ -8,6 +8,34 @@ export interface User {
   id: string;
   username: string;
   full_name: string;
+  role: string; // 'admin' | 'supervisor' | 'cashier'
+  is_active: number;
+  pin_code?: string | null;
+}
+
+export interface UserSession {
+  id: string;
+  username: string;
+  full_name: string;
+  role: string;
+  token: string;
+  login_time: string;
+}
+
+export interface CreateUserAccountInput {
+  username: string;
+  full_name: string;
+  password?: string;
+  pin_code?: string;
+  role: string;
+}
+
+export interface UpdateUserAccountInput {
+  id: string;
+  username: string;
+  full_name: string;
+  password?: string;
+  pin_code?: string;
   role: string;
   is_active: number;
 }

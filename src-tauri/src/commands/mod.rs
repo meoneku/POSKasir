@@ -414,7 +414,7 @@ pub fn update_shift_cashier(
 pub fn get_users(db: State<'_, Database>) -> Result<Vec<User>, String> {
     let conn = db.conn.lock();
     let mut stmt = conn
-        .prepare("SELECT id, username, full_name, role, is_active FROM users ORDER BY full_name ASC")
+        .prepare("SELECT id, username, full_name, role, is_active, pin_code FROM users ORDER BY full_name ASC")
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
@@ -425,6 +425,7 @@ pub fn get_users(db: State<'_, Database>) -> Result<Vec<User>, String> {
                 full_name: r.get(2)?,
                 role: r.get(3)?,
                 is_active: r.get(4)?,
+                pin_code: r.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -434,6 +435,238 @@ pub fn get_users(db: State<'_, Database>) -> Result<Vec<User>, String> {
         users.push(u.map_err(|e| e.to_string())?);
     }
     Ok(users)
+}
+
+#[tauri::command]
+pub fn login_with_pin(
+    db: State<'_, Database>,
+    user_id: Option<String>,
+    pin_code: String,
+) -> Result<UserSession, String> {
+    let conn = db.conn.lock();
+    let clean_pin = pin_code.trim();
+    if clean_pin.is_empty() {
+        return Err("PIN kasir wajib diisi".to_string());
+    }
+
+    let query_res = if let Some(ref uid) = user_id {
+        conn.query_row(
+            "SELECT id, username, full_name, role, pin_code, is_active FROM users WHERE id = ?1 AND is_active = 1",
+            params![uid],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, i64>(5)?,
+                ))
+            },
+        )
+    } else {
+        conn.query_row(
+            "SELECT id, username, full_name, role, pin_code, is_active FROM users WHERE pin_code = ?1 AND is_active = 1 LIMIT 1",
+            params![clean_pin],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, i64>(5)?,
+                ))
+            },
+        )
+    };
+
+    match query_res {
+        Ok((id, username, full_name, role, pin, _)) => {
+            if let Some(ref stored_pin) = pin {
+                if stored_pin == clean_pin {
+                    let session = UserSession {
+                        id,
+                        username,
+                        full_name,
+                        role,
+                        token: Uuid::new_v4().to_string(),
+                        login_time: Local::now().to_rfc3339(),
+                    };
+                    return Ok(session);
+                }
+            }
+            Err("PIN kasir salah. Silakan coba kembali.".to_string())
+        }
+        Err(_) => Err("Akun kasir tidak ditemukan atau berstatus non-aktif.".to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn login_with_credentials(
+    db: State<'_, Database>,
+    username: String,
+    password: String,
+) -> Result<UserSession, String> {
+    let conn = db.conn.lock();
+    let clean_uname = username.trim();
+    let clean_pass = password.trim();
+
+    if clean_uname.is_empty() || clean_pass.is_empty() {
+        return Err("Username dan password wajib diisi".to_string());
+    }
+
+    let user_row = conn.query_row(
+        "SELECT id, username, full_name, password_hash, role, is_active FROM users WHERE (username = ?1 OR full_name = ?1 COLLATE NOCASE) AND is_active = 1",
+        params![clean_uname],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, i64>(5)?,
+            ))
+        },
+    );
+
+    match user_row {
+        Ok((id, uname, full_name, stored_pass, role, _)) => {
+            if stored_pass == clean_pass {
+                let session = UserSession {
+                    id,
+                    username: uname,
+                    full_name,
+                    role,
+                    token: Uuid::new_v4().to_string(),
+                    login_time: Local::now().to_rfc3339(),
+                };
+                Ok(session)
+            } else {
+                Err("Password yang Anda masukkan salah.".to_string())
+            }
+        }
+        Err(_) => Err("Akun pengguna tidak ditemukan atau berstatus non-aktif.".to_string()),
+    }
+}
+
+#[tauri::command]
+pub fn create_user_account(
+    db: State<'_, Database>,
+    input: CreateUserAccountInput,
+) -> Result<User, String> {
+    let conn = db.conn.lock();
+    let clean_name = input.full_name.trim();
+    let clean_uname = input.username.trim();
+
+    if clean_name.is_empty() {
+        return Err("Nama lengkap pengguna wajib diisi".to_string());
+    }
+    if clean_uname.is_empty() {
+        return Err("Username wajib diisi".to_string());
+    }
+
+    let new_id = Uuid::new_v4().to_string();
+    let password = input.password.unwrap_or_else(|| "123456".to_string());
+    let pin_code = input.pin_code.unwrap_or_else(|| "1234".to_string());
+    let role = if input.role == "admin" || input.role == "supervisor" {
+        input.role
+    } else {
+        "cashier".to_string()
+    };
+
+    conn.execute(
+        "INSERT INTO users (id, username, full_name, password_hash, role, pin_code, is_active)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+        params![new_id, clean_uname, clean_name, password, role, pin_code],
+    )
+    .map_err(|e| format!("Gagal menambah pengguna (mungkin username sudah digunakan): {}", e))?;
+
+    Ok(User {
+        id: new_id,
+        username: clean_uname.to_string(),
+        full_name: clean_name.to_string(),
+        role,
+        is_active: 1,
+        pin_code: Some(pin_code),
+    })
+}
+
+#[tauri::command]
+pub fn update_user_account(
+    db: State<'_, Database>,
+    input: UpdateUserAccountInput,
+) -> Result<User, String> {
+    let conn = db.conn.lock();
+    let clean_name = input.full_name.trim();
+    let clean_uname = input.username.trim();
+
+    if clean_name.is_empty() || clean_uname.is_empty() {
+        return Err("Nama dan username tidak boleh kosong".to_string());
+    }
+
+    if let Some(ref pass) = input.password {
+        let clean_p = pass.trim();
+        if !clean_p.is_empty() {
+            conn.execute(
+                "UPDATE users SET password_hash = ?1 WHERE id = ?2",
+                params![clean_p, input.id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
+    if let Some(ref pin) = input.pin_code {
+        let clean_pin = pin.trim();
+        if !clean_pin.is_empty() {
+            conn.execute(
+                "UPDATE users SET pin_code = ?1 WHERE id = ?2",
+                params![clean_pin, input.id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
+    conn.execute(
+        "UPDATE users SET full_name = ?1, username = ?2, role = ?3, is_active = ?4 WHERE id = ?5",
+        params![clean_name, clean_uname, input.role, input.is_active, input.id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let updated = conn
+        .query_row(
+            "SELECT id, username, full_name, role, is_active, pin_code FROM users WHERE id = ?1",
+            params![input.id],
+            |r| {
+                Ok(User {
+                    id: r.get(0)?,
+                    username: r.get(1)?,
+                    full_name: r.get(2)?,
+                    role: r.get(3)?,
+                    is_active: r.get(4)?,
+                    pin_code: r.get(5)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())?;
+
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn toggle_user_status(
+    db: State<'_, Database>,
+    user_id: String,
+    is_active: i64,
+) -> Result<(), String> {
+    let conn = db.conn.lock();
+    conn.execute(
+        "UPDATE users SET is_active = ?1 WHERE id = ?2",
+        params![is_active, user_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -460,7 +693,7 @@ pub fn create_or_update_user(
 
         let user = conn
             .query_row(
-                "SELECT id, username, full_name, role, is_active FROM users WHERE id = ?1",
+                "SELECT id, username, full_name, role, is_active, pin_code FROM users WHERE id = ?1",
                 params![user_id],
                 |r| {
                     Ok(User {
@@ -469,6 +702,7 @@ pub fn create_or_update_user(
                         full_name: r.get(2)?,
                         role: r.get(3)?,
                         is_active: r.get(4)?,
+                        pin_code: r.get(5)?,
                     })
                 },
             )
@@ -479,8 +713,8 @@ pub fn create_or_update_user(
         let new_id = Uuid::new_v4().to_string();
         let uname = username.unwrap_or_else(|| format!("kasir_{}", &new_id[..6]));
         conn.execute(
-            "INSERT INTO users (id, username, full_name, password_hash, role, is_active)
-             VALUES (?1, ?2, ?3, '123456', ?4, 1)",
+            "INSERT INTO users (id, username, full_name, password_hash, role, pin_code, is_active)
+             VALUES (?1, ?2, ?3, '123456', ?4, '1234', 1)",
             params![new_id, uname, clean_name, role_val],
         )
         .map_err(|e| e.to_string())?;
@@ -491,6 +725,7 @@ pub fn create_or_update_user(
             full_name: clean_name.to_string(),
             role: role_val,
             is_active: 1,
+            pin_code: Some("1234".to_string()),
         })
     }
 }

@@ -7,6 +7,9 @@ import type {
   PaymentMethod,
   Shift,
   User,
+  UserSession,
+  CreateUserAccountInput,
+  UpdateUserAccountInput,
   Customer,
   Supplier,
   CreateTransactionPayload,
@@ -232,11 +235,88 @@ export const api = {
   async getUsers(): Promise<User[]> {
     if (!isTauri) {
       return [
-        { id: "u1", username: "admin", full_name: "Administrator Toko", role: "admin", is_active: 1 },
-        { id: "u2", username: "kasir1", full_name: "Kasir 1", role: "cashier", is_active: 1 },
+        { id: "u1", username: "admin", full_name: "Administrator Toko", role: "admin", is_active: 1, pin_code: "1234" },
+        { id: "u2", username: "kasir1", full_name: "Kasir 1", role: "cashier", is_active: 1, pin_code: "1111" },
       ];
     }
     return invoke("get_users");
+  },
+
+  async loginWithPin(pinCode: string, userId?: string): Promise<UserSession> {
+    if (!isTauri) {
+      if (pinCode === "1111" || pinCode === "1234") {
+        return {
+          id: pinCode === "1234" ? "u1" : "u2",
+          username: pinCode === "1234" ? "admin" : "kasir1",
+          full_name: pinCode === "1234" ? "Administrator Toko" : "Kasir 1",
+          role: pinCode === "1234" ? "admin" : "cashier",
+          token: "mock-token",
+          login_time: new Date().toISOString(),
+        };
+      }
+      throw new Error("PIN kasir salah");
+    }
+    return invoke("login_with_pin", { pinCode, userId: userId || null });
+  },
+
+  async loginWithCredentials(username: string, password: string): Promise<UserSession> {
+    if (!isTauri) {
+      if (username === "admin" && password === "admin123") {
+        return {
+          id: "u1",
+          username: "admin",
+          full_name: "Administrator Toko",
+          role: "admin",
+          token: "mock-token",
+          login_time: new Date().toISOString(),
+        };
+      }
+      if (username === "kasir1" && password === "kasir123") {
+        return {
+          id: "u2",
+          username: "kasir1",
+          full_name: "Kasir 1",
+          role: "cashier",
+          token: "mock-token",
+          login_time: new Date().toISOString(),
+        };
+      }
+      throw new Error("Username atau password salah");
+    }
+    return invoke("login_with_credentials", { username, password });
+  },
+
+  async createUserAccount(input: CreateUserAccountInput): Promise<User> {
+    if (!isTauri) {
+      return {
+        id: "u-new",
+        username: input.username,
+        full_name: input.full_name,
+        role: input.role,
+        is_active: 1,
+        pin_code: input.pin_code || "1234",
+      };
+    }
+    return invoke("create_user_account", { input });
+  },
+
+  async updateUserAccount(input: UpdateUserAccountInput): Promise<User> {
+    if (!isTauri) {
+      return {
+        id: input.id,
+        username: input.username,
+        full_name: input.full_name,
+        role: input.role,
+        is_active: input.is_active,
+        pin_code: input.pin_code || null,
+      };
+    }
+    return invoke("update_user_account", { input });
+  },
+
+  async toggleUserStatus(userId: string, isActive: number): Promise<void> {
+    if (!isTauri) return;
+    return invoke("toggle_user_status", { userId, isActive });
   },
 
   async createOrUpdateUser(input: { id?: string; fullName: string; role?: string; username?: string }): Promise<User> {

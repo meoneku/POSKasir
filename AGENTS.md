@@ -31,6 +31,7 @@ Setiap detail arsitektur, skema tabel, dan alur bisnis telah dipecah secara mend
 | [docs/05-customization-and-taxation.md](file:///d:/Project/PosKasir/docs/05-customization-and-taxation.md) | Mesin kustomisasi toko (profil, logo, formula nomor nota, metode bayar) dan mesin perpajakan (PPN 11%/12%, Inclusive/Exclusive, BKP vs Non-BKP). |
 | [docs/06-packaging-and-distribution.md](file:///d:/Project/PosKasir/docs/06-packaging-and-distribution.md) | Konfigurasi pengemasan installer Windows NSIS, Linux (.deb, .rpm, pacman, AppImage), dan macOS (.dmg). |
 | [docs/07-multi-branch-sync.md](file:///d:/Project/PosKasir/docs/07-multi-branch-sync.md) | Arsitektur sinkronisasi multi-cabang (Hub & Spoke / Mesh VPN), offline-first edge database, mutasi stok antar cabang, dan resolusi konflik. |
+| [docs/08-auth-and-user-roles.md](file:///d:/Project/PosKasir/docs/08-auth-and-user-roles.md) | Sistem otentikasi login kasir & multi-level user (Superadmin, Kasir, Supervisor), login PIN cepat numpad, dan kontrol hak akses menu (RBAC). |
 
 ---
 
@@ -89,3 +90,4 @@ Setiap AI Agent yang membuat atau memodifikasi kode **WAJIB MEMATUHI ATURAN INI*
 - [x] **Sprint 5**: Modul Hilir Grosir (Pelanggan B2B, Piutang Tempo, Surat Jalan, Faktur Pajak)
 - [x] **Sprint 6**: Modul Multi-Cabang & Sinkronisasi (Mutasi Stok Antar Cabang, Cloud Relay / Mesh VPN Sync)
 - [x] **Sprint 7**: Build & Packaging Multi-Platform (NSIS Windows, Linux .deb/.rpm/pacman, macOS .dmg)
+- [x] **Sprint 8**: Sistem Login Kasir & Multi-Level User (RBAC, PIN Cepat Numpad, Kunci Layar & Manajemen Pengguna)

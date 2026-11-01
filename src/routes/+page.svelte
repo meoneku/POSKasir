@@ -27,6 +27,10 @@
     ArrowLeftRight,
     Check,
     Radio,
+    UserPlus,
+    Edit,
+    Power,
+    KeyRound,
   } from "@lucide/svelte";
 
   import Header from "$lib/components/Header.svelte";
@@ -49,6 +53,8 @@
   import TransferNoteModal from "$lib/components/TransferNoteModal.svelte";
   import CrossBranchStockModal from "$lib/components/CrossBranchStockModal.svelte";
   import AddBranchModal from "$lib/components/AddBranchModal.svelte";
+  import LoginModal from "$lib/components/LoginModal.svelte";
+  import UserModal from "$lib/components/UserModal.svelte";
 
   import { api } from "$lib/api";
   import type {
@@ -60,6 +66,9 @@
     PaymentMethod,
     Shift,
     User,
+    UserSession,
+    CreateUserAccountInput,
+    UpdateUserAccountInput,
     Customer,
     Supplier,
     CartItem,
@@ -96,6 +105,10 @@
   let taxes = $state<Tax[]>([]);
   let paymentMethods = $state<PaymentMethod[]>([]);
   let currentShift = $state<Shift | null>(null);
+  let currentUser = $state<UserSession | null>(null);
+  let isLoginModalOpen = $state<boolean>(true);
+  let isUserModalOpen = $state<boolean>(false);
+  let selectedUserToEdit = $state<User | null>(null);
   let users = $state<User[]>([]);
   let newCashierNameInput = $state("");
   let customers = $state<Customer[]>([]);
@@ -275,6 +288,18 @@
 
   // --- LIFECYCLE & GLOBAL LISTENERS ---
   onMount(() => {
+    try {
+      const saved = localStorage.getItem("pos_session");
+      if (saved) {
+        currentUser = JSON.parse(saved);
+        isLoginModalOpen = false;
+      } else {
+        isLoginModalOpen = true;
+      }
+    } catch {
+      isLoginModalOpen = true;
+    }
+
     loadAllData();
 
     let barcodeBuffer = "";
@@ -283,6 +308,8 @@
     // Global Barcode & Shortcut Listener
     const handleGlobalKeydown = (e: KeyboardEvent) => {
       const isAnyModalOpen =
+        isLoginModalOpen ||
+        isUserModalOpen ||
         isPaymentModalOpen ||
         isShiftModalOpen ||
         isAddProductModalOpen ||
@@ -1015,6 +1042,73 @@
     }
   }
 
+  // --- AUTH & USER MANAGEMENT (SPRINT 8) ---
+  function handleLoginSuccess(session: UserSession) {
+    currentUser = session;
+    try {
+      localStorage.setItem("pos_session", JSON.stringify(session));
+    } catch {}
+    isLoginModalOpen = false;
+    showToast(`Selamat datang, ${session.full_name}!`);
+
+    // Jika Kasir login dan belum buka shift, langsung buka modal shift
+    if (session.role === "cashier" && (!currentShift || currentShift.status !== "open")) {
+      isShiftModalOpen = true;
+    }
+  }
+
+  function handleLockScreen() {
+    isLoginModalOpen = true;
+    showToast("Layar kasir dikunci sementara.");
+  }
+
+  function handleLogout() {
+    currentUser = null;
+    try {
+      localStorage.removeItem("pos_session");
+    } catch {}
+    isLoginModalOpen = true;
+    activeTab = "pos";
+    showToast("Anda telah berhasil keluar dari akun.");
+  }
+
+  function handleOpenAddUser() {
+    selectedUserToEdit = null;
+    isUserModalOpen = true;
+  }
+
+  function handleOpenEditUser(u: User) {
+    selectedUserToEdit = u;
+    isUserModalOpen = true;
+  }
+
+  async function handleSaveUserAccount(data: CreateUserAccountInput | UpdateUserAccountInput) {
+    try {
+      if ("id" in data && data.id) {
+        await api.updateUserAccount(data as UpdateUserAccountInput);
+        showToast(`Akun ${data.full_name} berhasil diperbarui!`);
+      } else {
+        await api.createUserAccount(data as CreateUserAccountInput);
+        showToast(`Akun baru ${data.full_name} berhasil didaftarkan!`);
+      }
+      users = await api.getUsers();
+      isUserModalOpen = false;
+    } catch (err: any) {
+      showToast(`Gagal menyimpan akun: ${err?.message || err}`);
+    }
+  }
+
+  async function handleToggleUserStatus(userId: string, currentStatus: number) {
+    try {
+      const nextStatus = currentStatus === 1 ? 0 : 1;
+      await api.toggleUserStatus(userId, nextStatus);
+      users = await api.getUsers();
+      showToast(nextStatus === 1 ? "Akun berhasil diaktifkan kembali." : "Akun berhasil dinonaktifkan.");
+    } catch (err: any) {
+      showToast(`Gagal mengubah status akun: ${err?.message || err}`);
+    }
+  }
+
   async function handleCloseShift(actualCash: number, notes?: string) {
     if (!currentShift) return;
     try {
@@ -1053,13 +1147,20 @@
     {storeName}
     branchName={storeBranch}
     shift={currentShift}
+    {currentUser}
     {serverInfo}
     onOpenShiftModal={() => (isShiftModalOpen = true)}
+    onLockScreen={handleLockScreen}
+    onLogout={handleLogout}
   />
 
   <div class="flex-1 flex overflow-hidden">
-    <!-- Sidebar Menu Kiri -->
-    <Sidebar {activeTab} onChangeTab={handleTabChange} />
+    <!-- Sidebar Menu Kiri (Dibatasi berdasarkan peran user: Superadmin vs Kasir) -->
+    <Sidebar
+      {activeTab}
+      userRole={currentUser?.role || "cashier"}
+      onChangeTab={handleTabChange}
+    />
 
     <!-- Konten Area Kerja Utama -->
     <main class="flex-1 flex flex-col overflow-hidden bg-slate-100">
@@ -2842,56 +2943,45 @@
               </div>
             </div>
 
-            <!-- Manajemen Kasir & Operator Toko -->
+            <!-- Manajemen Kasir & Operator Toko (Sprint 8: RBAC & User Management) -->
             <div class="bg-white border border-slate-200 rounded-lg p-5 shadow-xs space-y-4">
-              <h2 class="text-sm font-bold text-slate-900 border-b border-slate-200 pb-2 flex items-center justify-between">
+              <div class="flex justify-between items-center border-b border-slate-200 pb-2">
                 <div class="flex items-center gap-2">
                   <Users class="w-4 h-4 text-emerald-600" />
-                  <span>Daftar Kasir & Operator Toko</span>
+                  <h2 class="text-sm font-bold text-slate-900">Manajemen Pengguna & Kasir Toko</h2>
                 </div>
-                <span class="text-xs font-normal text-slate-500">
-                  {users.length} Pengguna Terdaftar
-                </span>
-              </h2>
-
-              <p class="text-xs text-slate-600">
-                Nama-nama kasir yang didaftarkan di sini akan muncul sebagai pilihan cepat saat buka shift kasir dan tercetak resmi di struk nota belanja.
-              </p>
-
-              <!-- Form Tambah Kasir Baru -->
-              <div class="flex gap-2">
-                <input
-                  type="text"
-                  bind:value={newCashierNameInput}
-                  placeholder="Ketik nama kasir baru (misal: Siti Rahma)"
-                  class="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:border-emerald-600"
-                />
                 <button
                   type="button"
-                  onclick={handleAddNewCashier}
-                  class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shrink-0"
+                  onclick={handleOpenAddUser}
+                  class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
                 >
-                  <Plus class="w-4 h-4" />
-                  <span>Tambah Kasir</span>
+                  <UserPlus class="w-3.5 h-3.5" />
+                  <span>Tambah Pengguna Baru</span>
                 </button>
               </div>
 
-              <!-- List Kasir -->
+              <p class="text-xs text-slate-600">
+                Kelola hak akses pengguna, PIN login cepat numpad kasir, password akun administrator, dan aktivasi akun kasir toko.
+              </p>
+
+              <!-- List Kasir & Pengguna -->
               <div class="border border-slate-200 rounded-lg overflow-hidden">
                 <table class="w-full text-xs text-left">
                   <thead class="bg-slate-100 text-slate-700 border-b border-slate-200">
                     <tr>
-                      <th class="py-2 px-3 font-semibold">Nama Lengkap</th>
-                      <th class="py-2 px-3 font-semibold">Username</th>
-                      <th class="py-2 px-3 font-semibold">Peran</th>
-                      <th class="py-2 px-3 font-semibold text-right">Status</th>
+                      <th class="py-2.5 px-3 font-semibold">Nama Lengkap</th>
+                      <th class="py-2.5 px-3 font-semibold">Username</th>
+                      <th class="py-2.5 px-3 font-semibold">Peran</th>
+                      <th class="py-2.5 px-3 font-semibold">PIN Kasir</th>
+                      <th class="py-2.5 px-3 font-semibold text-center">Status</th>
+                      <th class="py-2.5 px-3 font-semibold text-right">Aksi</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-slate-100">
                     {#each users as u}
-                      <tr class="hover:bg-slate-50 transition-colors">
+                      <tr class="hover:bg-slate-50 transition-colors {u.is_active === 0 ? 'opacity-50 bg-slate-50/50' : ''}">
                         <td class="py-2.5 px-3 font-semibold text-slate-900 flex items-center gap-2">
-                          <span class="w-6 h-6 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 text-[10px] font-bold">
+                          <span class="w-6 h-6 rounded-full {u.role === 'admin' ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-slate-100 text-slate-600 border-slate-200'} border flex items-center justify-center text-[10px] font-bold">
                             {u.full_name.slice(0, 1).toUpperCase()}
                           </span>
                           <span>{u.full_name}</span>
@@ -2903,15 +2993,47 @@
                         </td>
                         <td class="py-2.5 px-3 text-slate-600 font-mono text-[11px]">{u.username}</td>
                         <td class="py-2.5 px-3">
-                          <span class="px-2 py-0.5 rounded text-[10px] font-semibold capitalize {u.role === 'admin' ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-slate-100 text-slate-700 border border-slate-200'}">
-                            {u.role === 'admin' ? 'Admin' : 'Kasir'}
+                          <span class="px-2 py-0.5 rounded text-[10px] font-semibold capitalize {u.role === 'admin' ? 'bg-amber-100 text-amber-900 border border-amber-300' : u.role === 'supervisor' ? 'bg-blue-100 text-blue-900 border border-blue-300' : 'bg-slate-100 text-slate-700 border border-slate-200'}">
+                            {u.role === 'admin' ? 'Superadmin' : u.role === 'supervisor' ? 'Supervisor' : 'Kasir'}
                           </span>
                         </td>
+                        <td class="py-2.5 px-3 font-mono text-slate-700">
+                          {u.pin_code ? '••••' : '-'}
+                        </td>
+                        <td class="py-2.5 px-3 text-center">
+                          {#if u.is_active === 1}
+                            <span class="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700">
+                              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                              Aktif
+                            </span>
+                          {:else}
+                            <span class="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400">
+                              <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                              Non-aktif
+                            </span>
+                          {/if}
+                        </td>
                         <td class="py-2.5 px-3 text-right">
-                          <span class="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            Aktif
-                          </span>
+                          <div class="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              title="Edit Pengguna & Reset PIN/Password"
+                              onclick={() => handleOpenEditUser(u)}
+                              class="p-1.5 rounded text-slate-600 hover:text-emerald-700 hover:bg-slate-200 transition-colors"
+                            >
+                              <Edit class="w-3.5 h-3.5" />
+                            </button>
+                            {#if u.id !== currentUser?.id}
+                              <button
+                                type="button"
+                                title={u.is_active === 1 ? "Nonaktifkan Akun" : "Aktifkan Akun"}
+                                onclick={() => handleToggleUserStatus(u.id, u.is_active)}
+                                class="p-1.5 rounded transition-colors {u.is_active === 1 ? 'text-slate-400 hover:text-rose-600 hover:bg-rose-50' : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'}"
+                              >
+                                <Power class="w-3.5 h-3.5" />
+                              </button>
+                            {/if}
+                          </div>
                         </td>
                       </tr>
                     {/each}
@@ -3069,5 +3191,20 @@
     isOpen={isAddBranchModalOpen}
     onClose={() => (isAddBranchModalOpen = false)}
     onSubmit={handleCreateBranch}
+  />
+
+  <!-- MODAL EDIT / TAMBAH PENGGUNA (SPRINT 8: SUPERADMIN USER MANAGEMENT) -->
+  <UserModal
+    isOpen={isUserModalOpen}
+    userToEdit={selectedUserToEdit}
+    onClose={() => (isUserModalOpen = false)}
+    onSave={handleSaveUserAccount}
+  />
+
+  <!-- MODAL LOGIN UTAMA & KUNCI LAYAR (SPRINT 8: FAST PIN & RBAC) -->
+  <LoginModal
+    isOpen={isLoginModalOpen}
+    {users}
+    onLoginSuccess={handleLoginSuccess}
   />
 </div>

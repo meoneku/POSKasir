@@ -14,6 +14,7 @@ Aplikasi ini dapat langsung digunakan **tanpa perlu koneksi internet terus-mener
 - 🖨️ **Dukungan Printer Lengkap**: Cetak struk thermal kasir (ukuran 58mm & 80mm), cetak Faktur Pajak A4, dan cetak Surat Jalan Pengiriman barang.
 - 📦 **Multi-Satuan & Harga Bertingkat**: Satu produk bisa dijual dalam berbagai satuan (misal: Beli per Dus dari supplier, lalu dijual per Dus, per Pak, atau per Pcs) dengan harga grosir otomatis.
 - 🏢 **Siap untuk Toko Multi-Cabang**: Pantau ketersediaan stok di cabang lain dan kirim mutasi barang antar toko dengan mudah.
+- 🔐 **Keamanan & Multi-Level Akses (Superadmin & Kasir)**: Login cepat kasir via PIN 4 digit numpad, proteksi menu sensitif (*RBAC*), kunci layar sementara (*lock screen*), dan manajemen akun kasir.
 - 🛡️ **Data Tersimpan Mandiri**: Seluruh riwayat penjualan, data pelanggan, dan data keuangan tersimpan aman di komputer toko Anda sendiri.
 
 ---

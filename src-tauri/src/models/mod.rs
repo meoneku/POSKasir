@@ -113,6 +113,37 @@ pub struct User {
     pub full_name: String,
     pub role: String,
     pub is_active: i64,
+    pub pin_code: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UserSession {
+    pub id: String,
+    pub username: String,
+    pub full_name: String,
+    pub role: String,
+    pub token: String,
+    pub login_time: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateUserAccountInput {
+    pub username: String,
+    pub full_name: String,
+    pub password: Option<String>,
+    pub pin_code: Option<String>,
+    pub role: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UpdateUserAccountInput {
+    pub id: String,
+    pub username: String,
+    pub full_name: String,
+    pub password: Option<String>,
+    pub pin_code: Option<String>,
+    pub role: String,
+    pub is_active: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

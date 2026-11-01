@@ -12,21 +12,26 @@
 
   interface Props {
     activeTab: string;
+    userRole?: string;
     onChangeTab: (tab: string) => void;
   }
 
-  let { activeTab = "pos", onChangeTab }: Props = $props();
+  let { activeTab = "pos", userRole = "admin", onChangeTab }: Props = $props();
 
-  const menuItems = [
-    { id: "pos", label: "Kasir Retail", icon: ShoppingCart, shortcut: "F1" },
-    { id: "wholesale", label: "Kasir Grosir", icon: Truck, shortcut: "" },
-    { id: "inventory", label: "Inventaris & Stok", icon: Boxes, shortcut: "" },
-    { id: "branches", label: "Multi-Cabang & Mutasi", icon: Network, shortcut: "" },
-    { id: "procurement", label: "Supplier & PO", icon: ReceiptText, shortcut: "" },
-    { id: "customers", label: "Pelanggan & Piutang", icon: Users, shortcut: "" },
-    { id: "reports", label: "Laporan & Pajak", icon: BarChart3, shortcut: "" },
-    { id: "settings", label: "Pengaturan Toko", icon: Settings, shortcut: "" },
+  const allMenuItems = [
+    { id: "pos", label: "Kasir Retail", icon: ShoppingCart, shortcut: "F1", roles: ["cashier", "supervisor", "admin"] },
+    { id: "wholesale", label: "Kasir Grosir", icon: Truck, shortcut: "", roles: ["cashier", "supervisor", "admin"] },
+    { id: "inventory", label: "Inventaris & Stok", icon: Boxes, shortcut: "", roles: ["cashier", "supervisor", "admin"] },
+    { id: "branches", label: "Multi-Cabang & Mutasi", icon: Network, shortcut: "", roles: ["cashier", "supervisor", "admin"] },
+    { id: "customers", label: "Pelanggan & Piutang", icon: Users, shortcut: "", roles: ["cashier", "supervisor", "admin"] },
+    { id: "procurement", label: "Supplier & PO", icon: ReceiptText, shortcut: "", roles: ["supervisor", "admin"] },
+    { id: "reports", label: "Laporan & Pajak", icon: BarChart3, shortcut: "", roles: ["supervisor", "admin"] },
+    { id: "settings", label: "Pengaturan Toko", icon: Settings, shortcut: "", roles: ["admin"] },
   ];
+
+  let menuItems = $derived(
+    allMenuItems.filter((item) => item.roles.includes(userRole))
+  );
 </script>
 
 <aside class="w-56 bg-slate-900 text-slate-300 border-r border-slate-800 flex flex-col justify-between shrink-0 select-none">
