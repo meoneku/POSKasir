@@ -37,7 +37,11 @@
       "nsis": {
         "installMode": "both",
         "languages": ["English", "Indonesian"],
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico"
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
       }
     },
     "linux": {
@@ -46,7 +50,14 @@
       },
       "rpm": {
         "depends": ["webkit2gtk4.1"]
+      },
+      "appimage": {
+        "bundleMediaFramework": false
       }
+    },
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "10.15"
     }
   }
 }

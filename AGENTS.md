@@ -88,4 +88,4 @@ Setiap AI Agent yang membuat atau memodifikasi kode **WAJIB MEMATUHI ATURAN INI*
 - [x] **Sprint 4**: Modul Hilir Retail (Kasir Cepat, Barcode, Struk Thermal, Cash Drawer, Shift)
 - [x] **Sprint 5**: Modul Hilir Grosir (Pelanggan B2B, Piutang Tempo, Surat Jalan, Faktur Pajak)
 - [x] **Sprint 6**: Modul Multi-Cabang & Sinkronisasi (Mutasi Stok Antar Cabang, Cloud Relay / Mesh VPN Sync)
-- [ ] **Sprint 7**: Build & Packaging Multi-Platform (NSIS Windows, Linux .deb/.rpm/pacman, macOS .dmg)
+- [x] **Sprint 7**: Build & Packaging Multi-Platform (NSIS Windows, Linux .deb/.rpm/pacman, macOS .dmg)

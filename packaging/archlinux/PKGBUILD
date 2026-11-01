@@ -1,0 +1,23 @@
+# Maintainer: Tim Pengembang POS Kasir <support@poskasir.id>
+pkgname=pos-kasir-desktop-bin
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Aplikasi POS Kasir Desktop Multi-Platform (Tauri v2 + Svelte 5 + SQLite WAL)"
+arch=('x86_64')
+url="https://poskasir.id"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'openssl' 'gtk3' 'cairo' 'glib2')
+provides=('pos-kasir-desktop')
+conflicts=('pos-kasir-desktop')
+source=("pos-kasir-desktop.desktop"
+        "https://github.com/poskasir/pos-kasir-desktop/releases/download/v${pkgver}/pos-kasir-desktop_${pkgver}_amd64.deb")
+sha256sums=('SKIP'
+            'SKIP')
+
+package() {
+    # Ekstrak data dari paket deb
+    tar -xf data.tar.* -C "${pkgdir}/"
+
+    # Pasang file desktop dan icon
+    install -Dm644 "${srcdir}/pos-kasir-desktop.desktop" "${pkgdir}/usr/share/applications/pos-kasir-desktop.desktop"
+}

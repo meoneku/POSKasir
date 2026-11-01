@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=POS Kasir Desktop
+Comment=Sistem POS Kasir Retail & Grosir Terpadu Multi-Cabang
+Exec=pos_kasir_desktop
+Icon=pos_kasir_desktop
+Terminal=false
+Type=Application
+Categories=Office;Finance;PointOfSale;
+StartupNotify=true
+StartupWMClass=POS Kasir Desktop
+Keywords=pos;kasir;retail;wholesale;cashier;inventory;
