@@ -1,30 +1,42 @@
 <script lang="ts">
-  import { X, ShieldCheck, ArrowDownCircle, ArrowUpCircle, Check, FileText, Printer, Calculator } from "@lucide/svelte";
-  import type { Shift, ShiftReport } from "$lib/types";
+  import { X, ShieldCheck, ArrowDownCircle, ArrowUpCircle, Check, FileText, Printer, Calculator, User, Edit2, UserCheck } from "@lucide/svelte";
+  import type { Shift, ShiftReport, User as UserType } from "$lib/types";
   import { api } from "$lib/api";
 
   interface Props {
     isOpen: boolean;
     currentShift: Shift | null;
+    users?: UserType[];
     onClose: () => void;
-    onStartShift: (startingCash: number) => void;
+    onStartShift: (cashierName: string, startingCash: number) => void;
     onCloseShift: (actualCash: number, notes?: string) => void;
     onAddCashMovement: (type: "in" | "out", amount: number, reason: string) => void;
+    onUpdateCashier?: (cashierName: string) => void;
   }
 
   let {
     isOpen = false,
     currentShift = null,
+    users = [],
     onClose,
     onStartShift,
     onCloseShift,
     onAddCashMovement,
+    onUpdateCashier,
   }: Props = $props();
 
   let activeTab = $state<"status" | "movement" | "report" | "close">("status");
+  let cashierNameInput = $state(
+    typeof localStorage !== "undefined"
+      ? (localStorage.getItem("pos_last_cashier_name") || "Kasir 1")
+      : "Kasir 1"
+  );
   let startingCashInput = $state(500000);
   let actualCashInput = $state(0);
   let closeNotes = $state("");
+
+  let isEditingCashier = $state(false);
+  let editCashierInput = $state("");
 
   let movementType = $state<"in" | "out">("out");
   let movementAmount = $state(50000);
@@ -36,6 +48,12 @@
   $effect(() => {
     if (isOpen && currentShift?.id && activeTab === "report") {
       loadReport(currentShift.id);
+    }
+  });
+
+  $effect(() => {
+    if (isOpen && currentShift?.cashier_name) {
+      editCashierInput = currentShift.cashier_name;
     }
   });
 
@@ -51,7 +69,23 @@
   }
 
   function handleStartShift() {
-    onStartShift(startingCashInput);
+    const finalName = cashierNameInput.trim() || "Kasir 1";
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("pos_last_cashier_name", finalName);
+    }
+    onStartShift(finalName, startingCashInput);
+  }
+
+  function handleSaveEditCashier() {
+    const finalName = editCashierInput.trim();
+    if (!finalName) return;
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("pos_last_cashier_name", finalName);
+    }
+    if (onUpdateCashier) {
+      onUpdateCashier(finalName);
+    }
+    isEditingCashier = false;
   }
 
   function handleCloseShift() {
@@ -129,38 +163,120 @@
         {#if !currentShift || currentShift.status === "closed"}
           <!-- Form Buka Shift Baru -->
           <div class="space-y-4">
-            <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
-              Shift kasir saat ini sedang tutup. Silakan masukkan modal awal uang receh di laci kasir untuk mulai transaksi.
+            <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-950 flex items-start gap-2.5">
+              <UserCheck class="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+              <div>
+                <div class="font-bold">Buka Shift Kasir Baru</div>
+                <div class="text-[11px] text-emerald-800 mt-0.5">
+                  Silakan masukkan nama kasir yang sedang bertugas dan modal awal di laci untuk memulai transaksi penjualan.
+                </div>
+              </div>
             </div>
 
+            <!-- Input Nama Kasir -->
+            <div>
+              <label for="shift-cashier-name-input" class="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                <span>Nama Kasir yang Bertugas</span>
+                <span class="text-[10px] text-slate-400 font-normal">Ketik bebas / pilih di bawah</span>
+              </label>
+              <div class="relative">
+                <input
+                  id="shift-cashier-name-input"
+                  type="text"
+                  bind:value={cashierNameInput}
+                  placeholder="Contoh: Dewi Lestari, Siti, Rian..."
+                  class="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-900 focus:outline-none focus:border-emerald-600 shadow-xs"
+                />
+                <User class="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              </div>
+
+              <!-- Pilihan Cepat Kasir Terdaftar -->
+              {#if users && users.length > 0}
+                <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span class="text-[10px] text-slate-500 font-medium">Pilihan cepat:</span>
+                  {#each users.filter((u) => u.role === "cashier" || u.role === "admin") as u}
+                    <button
+                      type="button"
+                      onclick={() => (cashierNameInput = u.full_name)}
+                      class="px-2 py-0.5 rounded text-[11px] border transition-colors {cashierNameInput === u.full_name ? 'bg-emerald-100 border-emerald-600 text-emerald-900 font-bold' : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'}"
+                    >
+                      {u.full_name}
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+
+            <!-- Input Modal Awal di Laci -->
             <div>
               <label for="shift-starting-cash-input" class="block text-xs font-semibold text-slate-700 mb-1">
-                Modal Awal di Laci (Rp)
+                Modal Awal di Laci Kasir (Rp)
               </label>
-              <input
-                id="shift-starting-cash-input"
-                type="number"
-                bind:value={startingCashInput}
-                class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-base font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-600"
-              />
+              <div class="relative">
+                <input
+                  id="shift-starting-cash-input"
+                  type="number"
+                  bind:value={startingCashInput}
+                  class="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-base font-mono font-bold text-slate-900 focus:outline-none focus:border-emerald-600 shadow-xs"
+                />
+                <Calculator class="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+              </div>
             </div>
 
             <button
               type="button"
               onclick={handleStartShift}
-              class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5"
+              class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-xs"
             >
               <Check class="w-4 h-4" />
-              <span>Buka Shift & Aktifkan Kasir</span>
+              <span>Buka Shift & Mulai Transaksi ({cashierNameInput || 'Kasir'})</span>
             </button>
           </div>
         {:else if activeTab === "status"}
           <!-- Ringkasan Shift Aktif -->
           <div class="space-y-3 text-xs text-slate-700">
             <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
-              <div class="flex justify-between">
+              <div class="flex justify-between items-center">
                 <span class="text-slate-500">Kasir Bertugas:</span>
-                <span class="font-bold text-slate-900">{currentShift.cashier_name || "Kasir Utama"}</span>
+                {#if isEditingCashier}
+                  <div class="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      bind:value={editCashierInput}
+                      class="px-2 py-1 text-xs font-bold text-slate-900 border border-emerald-500 rounded bg-white w-32 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onclick={handleSaveEditCashier}
+                      class="px-2 py-1 bg-emerald-600 text-white rounded text-[11px] font-bold hover:bg-emerald-700"
+                    >
+                      Simpan
+                    </button>
+                    <button
+                      type="button"
+                      onclick={() => (isEditingCashier = false)}
+                      class="px-2 py-1 bg-slate-200 text-slate-700 rounded text-[11px] hover:bg-slate-300"
+                    >
+                      Batal
+                    </button>
+                  </div>
+                {:else}
+                  <div class="flex items-center gap-1.5">
+                    <span class="font-bold text-slate-900">{currentShift.cashier_name || "Kasir Utama"}</span>
+                    <button
+                      type="button"
+                      title="Ganti Nama Kasir yang Bertugas"
+                      onclick={() => {
+                        editCashierInput = currentShift?.cashier_name || "";
+                        isEditingCashier = true;
+                      }}
+                      class="p-1 rounded text-slate-400 hover:text-emerald-700 hover:bg-slate-200 transition-colors flex items-center gap-0.5 text-[10px]"
+                    >
+                      <Edit2 class="w-3 h-3" />
+                      <span>Ganti</span>
+                    </button>
+                  </div>
+                {/if}
               </div>
               <div class="flex justify-between">
                 <span class="text-slate-500">Mulai Shift:</span>

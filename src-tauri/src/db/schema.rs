@@ -320,7 +320,7 @@ INSERT OR IGNORE INTO payment_methods (id, code, name, category, sort_order) VAL
 -- Pengguna Default (Admin & Kasir)
 INSERT OR IGNORE INTO users (id, username, full_name, password_hash, role, pin_code) VALUES
 ('u0000000-0000-0000-0000-000000000001', 'admin', 'Administrator Toko', 'admin123', 'admin', '1234'),
-('u0000000-0000-0000-0000-000000000002', 'kasir1', 'Kasir Utama (Budi)', 'kasir123', 'cashier', '1111');
+('u0000000-0000-0000-0000-000000000002', 'kasir1', 'Kasir 1', 'kasir123', 'cashier', '1111');
 
 -- Kategori Default
 INSERT OR IGNORE INTO categories (id, name, description) VALUES

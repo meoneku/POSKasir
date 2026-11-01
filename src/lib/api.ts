@@ -6,6 +6,7 @@ import type {
   Tax,
   PaymentMethod,
   Shift,
+  User,
   Customer,
   Supplier,
   CreateTransactionPayload,
@@ -199,7 +200,7 @@ export const api = {
       return {
         id: "s1",
         cashier_id: "u2",
-        cashier_name: "Kasir Utama (Budi)",
+        cashier_name: "Kasir 1",
         start_time: new Date().toISOString(),
         end_time: null,
         starting_cash: 500000,
@@ -213,9 +214,41 @@ export const api = {
     return invoke("get_current_shift");
   },
 
-  async startShift(cashierId: string, startingCash: number): Promise<string> {
+  async startShift(cashierIdOrName: string, startingCash: number, cashierName?: string): Promise<string> {
     if (!isTauri) return "shift-id";
-    return invoke("start_shift", { cashierId, startingCash });
+    const isId = cashierIdOrName.startsWith("u00") || (cashierIdOrName.length > 30 && cashierIdOrName.includes("-"));
+    return invoke("start_shift", {
+      cashierId: isId ? cashierIdOrName : null,
+      cashierName: cashierName || (!isId ? cashierIdOrName : null),
+      startingCash,
+    });
+  },
+
+  async updateShiftCashier(shiftId: string, cashierName: string): Promise<string> {
+    if (!isTauri) return "u-mock";
+    return invoke("update_shift_cashier", { shiftId, cashierName });
+  },
+
+  async getUsers(): Promise<User[]> {
+    if (!isTauri) {
+      return [
+        { id: "u1", username: "admin", full_name: "Administrator Toko", role: "admin", is_active: 1 },
+        { id: "u2", username: "kasir1", full_name: "Kasir 1", role: "cashier", is_active: 1 },
+      ];
+    }
+    return invoke("get_users");
+  },
+
+  async createOrUpdateUser(input: { id?: string; fullName: string; role?: string; username?: string }): Promise<User> {
+    if (!isTauri) {
+      return { id: input.id || "u-new", username: input.username || "kasir_new", full_name: input.fullName, role: input.role || "cashier", is_active: 1 };
+    }
+    return invoke("create_or_update_user", {
+      id: input.id || null,
+      fullName: input.fullName,
+      role: input.role || null,
+      username: input.username || null,
+    });
   },
 
   async closeShift(shiftId: string, actualCash: number, notes?: string): Promise<void> {
@@ -364,7 +397,7 @@ export const api = {
         id: "tx-mock",
         invoice_number: idOrInvoice,
         order_type: "retail",
-        cashier_name: "Kasir Utama (Budi)",
+        cashier_name: "Kasir 1",
         customer_name: "Pelanggan Umum",
         customer_phone: undefined,
         customer_address: "Jl. Melati No. 45, Jakarta",
@@ -419,7 +452,7 @@ export const api = {
     if (!isTauri) {
       return {
         shift_id: shiftId,
-        cashier_name: "Kasir Utama (Budi)",
+        cashier_name: "Kasir 1",
         start_time: new Date().toISOString(),
         end_time: undefined,
         status: "open",

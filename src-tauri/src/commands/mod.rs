@@ -318,20 +318,181 @@ pub fn get_current_shift(db: State<'_, Database>) -> Result<Option<Shift>, Strin
 #[tauri::command]
 pub fn start_shift(
     db: State<'_, Database>,
-    cashier_id: String,
+    cashier_id: Option<String>,
+    cashier_name: Option<String>,
     starting_cash: f64,
 ) -> Result<String, String> {
     let conn = db.conn.lock();
     let shift_id = Uuid::new_v4().to_string();
     let now = Local::now().to_rfc3339();
 
+    let final_user_id = if let Some(ref name) = cashier_name {
+        let clean_name = name.trim();
+        if !clean_name.is_empty() {
+            let existing_id: Result<String, _> = conn.query_row(
+                "SELECT id FROM users WHERE full_name = ?1 COLLATE NOCASE LIMIT 1",
+                params![clean_name],
+                |r| r.get(0),
+            );
+            match existing_id {
+                Ok(id) => id,
+                Err(_) => {
+                    let new_id = Uuid::new_v4().to_string();
+                    let username = format!("kasir_{}", &new_id[..6]);
+                    conn.execute(
+                        "INSERT INTO users (id, username, full_name, password_hash, role, is_active)
+                         VALUES (?1, ?2, ?3, '123456', 'cashier', 1)",
+                        params![new_id, username, clean_name],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    new_id
+                }
+            }
+        } else if let Some(ref cid) = cashier_id {
+            cid.clone()
+        } else {
+            "u0000000-0000-0000-0000-000000000002".to_string()
+        }
+    } else if let Some(ref cid) = cashier_id {
+        cid.clone()
+    } else {
+        "u0000000-0000-0000-0000-000000000002".to_string()
+    };
+
     conn.execute(
         "INSERT INTO shifts (id, cashier_id, start_time, starting_cash, status) VALUES (?1, ?2, ?3, ?4, 'open')",
-        params![shift_id, cashier_id, now, starting_cash],
+        params![shift_id, final_user_id, now, starting_cash],
     )
     .map_err(|e| e.to_string())?;
 
     Ok(shift_id)
+}
+
+#[tauri::command]
+pub fn update_shift_cashier(
+    db: State<'_, Database>,
+    shift_id: String,
+    cashier_name: String,
+) -> Result<String, String> {
+    let conn = db.conn.lock();
+    let clean_name = cashier_name.trim();
+    if clean_name.is_empty() {
+        return Err("Nama kasir tidak boleh kosong".to_string());
+    }
+
+    let existing_id: Result<String, _> = conn.query_row(
+        "SELECT id FROM users WHERE full_name = ?1 COLLATE NOCASE LIMIT 1",
+        params![clean_name],
+        |r| r.get(0),
+    );
+
+    let user_id = match existing_id {
+        Ok(id) => id,
+        Err(_) => {
+            let new_id = Uuid::new_v4().to_string();
+            let username = format!("kasir_{}", &new_id[..6]);
+            conn.execute(
+                "INSERT INTO users (id, username, full_name, password_hash, role, is_active)
+                 VALUES (?1, ?2, ?3, '123456', 'cashier', 1)",
+                params![new_id, username, clean_name],
+            )
+            .map_err(|e| e.to_string())?;
+            new_id
+        }
+    };
+
+    conn.execute(
+        "UPDATE shifts SET cashier_id = ?1 WHERE id = ?2",
+        params![user_id, shift_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(user_id)
+}
+
+#[tauri::command]
+pub fn get_users(db: State<'_, Database>) -> Result<Vec<User>, String> {
+    let conn = db.conn.lock();
+    let mut stmt = conn
+        .prepare("SELECT id, username, full_name, role, is_active FROM users ORDER BY full_name ASC")
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(User {
+                id: r.get(0)?,
+                username: r.get(1)?,
+                full_name: r.get(2)?,
+                role: r.get(3)?,
+                is_active: r.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut users = Vec::new();
+    for u in rows {
+        users.push(u.map_err(|e| e.to_string())?);
+    }
+    Ok(users)
+}
+
+#[tauri::command]
+pub fn create_or_update_user(
+    db: State<'_, Database>,
+    id: Option<String>,
+    full_name: String,
+    role: Option<String>,
+    username: Option<String>,
+) -> Result<User, String> {
+    let conn = db.conn.lock();
+    let clean_name = full_name.trim();
+    if clean_name.is_empty() {
+        return Err("Nama pengguna / kasir tidak boleh kosong".to_string());
+    }
+    let role_val = role.unwrap_or_else(|| "cashier".to_string());
+
+    if let Some(user_id) = id {
+        conn.execute(
+            "UPDATE users SET full_name = ?1, role = ?2 WHERE id = ?3",
+            params![clean_name, role_val, user_id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        let user = conn
+            .query_row(
+                "SELECT id, username, full_name, role, is_active FROM users WHERE id = ?1",
+                params![user_id],
+                |r| {
+                    Ok(User {
+                        id: r.get(0)?,
+                        username: r.get(1)?,
+                        full_name: r.get(2)?,
+                        role: r.get(3)?,
+                        is_active: r.get(4)?,
+                    })
+                },
+            )
+            .map_err(|e| e.to_string())?;
+
+        Ok(user)
+    } else {
+        let new_id = Uuid::new_v4().to_string();
+        let uname = username.unwrap_or_else(|| format!("kasir_{}", &new_id[..6]));
+        conn.execute(
+            "INSERT INTO users (id, username, full_name, password_hash, role, is_active)
+             VALUES (?1, ?2, ?3, '123456', ?4, 1)",
+            params![new_id, uname, clean_name, role_val],
+        )
+        .map_err(|e| e.to_string())?;
+
+        Ok(User {
+            id: new_id,
+            username: uname,
+            full_name: clean_name.to_string(),
+            role: role_val,
+            is_active: 1,
+        })
+    }
 }
 
 #[tauri::command]

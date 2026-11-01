@@ -91,17 +91,22 @@
       <span class="font-mono font-medium">{timeString || "00:00:00"}</span>
     </div>
 
-    <!-- Kasir Aktif -->
-    <div class="flex items-center gap-2 pl-2 border-l border-slate-200">
-      <div class="w-7 h-7 rounded-full bg-slate-100 border border-slate-300 flex items-center justify-center text-slate-700">
+    <!-- Kasir Aktif (Klik untuk ganti kasir / kelola shift) -->
+    <button
+      type="button"
+      onclick={onOpenShiftModal}
+      title="Klik untuk melihat shift atau ganti kasir bertugas"
+      class="flex items-center gap-2 pl-2 border-l border-slate-200 hover:opacity-85 transition-opacity text-left cursor-pointer group"
+    >
+      <div class="w-7 h-7 rounded-full bg-slate-100 group-hover:bg-emerald-50 border border-slate-300 group-hover:border-emerald-400 flex items-center justify-center text-slate-700 group-hover:text-emerald-700 transition-colors">
         <User class="w-3.5 h-3.5" />
       </div>
       <div class="text-left hidden md:block">
-        <div class="text-xs font-semibold text-slate-900 leading-tight">
+        <div class="text-xs font-semibold text-slate-900 group-hover:text-emerald-800 leading-tight">
           {shift?.cashier_name || "Kasir Utama"}
         </div>
-        <div class="text-[10px] text-slate-500 capitalize">Operator Kasir</div>
+        <div class="text-[10px] text-slate-500 capitalize">Operator Kasir (Ganti)</div>
       </div>
-    </div>
+    </button>
   </div>
 </header>

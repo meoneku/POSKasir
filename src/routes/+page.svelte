@@ -59,6 +59,7 @@
     Tax,
     PaymentMethod,
     Shift,
+    User,
     Customer,
     Supplier,
     CartItem,
@@ -95,6 +96,8 @@
   let taxes = $state<Tax[]>([]);
   let paymentMethods = $state<PaymentMethod[]>([]);
   let currentShift = $state<Shift | null>(null);
+  let users = $state<User[]>([]);
+  let newCashierNameInput = $state("");
   let customers = $state<Customer[]>([]);
   let suppliers = $state<Supplier[]>([]);
   let purchases = $state<PurchaseHeader[]>([]);
@@ -415,7 +418,7 @@
   async function loadAllData() {
     isLoading = true;
     try {
-      const [s, c, p, t, pm, sh, cust, sup, r, ds, srv, po, br, curBr, trf, syncSt, sLogs] = await Promise.all([
+      const [s, c, p, t, pm, sh, cust, sup, r, ds, srv, po, br, curBr, trf, syncSt, sLogs, uList] = await Promise.all([
         api.getStoreSettings(),
         api.getCategories(),
         api.getProducts(),
@@ -433,6 +436,7 @@
         api.getInterBranchTransfers(),
         api.getSyncStatus(),
         api.getSyncLogs(),
+        api.getUsers(),
       ]);
       settings = s;
       categories = c;
@@ -440,6 +444,7 @@
       taxes = t;
       paymentMethods = pm;
       currentShift = sh;
+      users = uList;
       customers = cust;
       suppliers = sup;
       recentTransactions = r;
@@ -466,6 +471,10 @@
       // Transisi halus dengan durasi 150ms
       setTimeout(() => {
         isLoading = false;
+        // Jika saat aplikasi dibuka belum ada shift kasir aktif, otomatis buka dialog input nama kasir
+        if (!currentShift || currentShift.status !== "open") {
+          isShiftModalOpen = true;
+        }
       }, 150);
     }
   }
@@ -910,7 +919,7 @@
       const payload = {
         order_type: (isWholesale ? "wholesale" : "retail") as "retail" | "wholesale",
         customer_id: selectedWholesaleCustomerId,
-        cashier_id: currentShift?.cashier_id || "u0000000-0000-0000-0000-000000000002",
+        cashier_id: currentShift?.cashier_id || users.find((u) => u.role === "cashier")?.id || "u0000000-0000-0000-0000-000000000002",
         shift_id: currentShift?.id || null,
         subtotal: cartSubtotal,
         discount_total: 0,
@@ -969,14 +978,40 @@
   }
 
   // --- MANAJEMEN SHIFT KASIR ---
-  async function handleStartShift(startingCash: number) {
+  async function handleStartShift(cashierName: string, startingCash: number) {
     try {
-      await api.startShift("u0000000-0000-0000-0000-000000000002", startingCash);
+      await api.startShift(cashierName, startingCash, cashierName);
       currentShift = await api.getCurrentShift();
+      users = await api.getUsers();
       isShiftModalOpen = false;
-      showToast("Shift kasir baru berhasil dibuka!");
+      showToast(`Shift kasir (${cashierName}) berhasil dibuka!`);
     } catch (err) {
-      showToast("Gagal membuka shift!");
+      showToast(`Gagal membuka shift: ${err}`);
+    }
+  }
+
+  async function handleUpdateCashier(cashierName: string) {
+    if (!currentShift) return;
+    try {
+      await api.updateShiftCashier(currentShift.id, cashierName);
+      currentShift = await api.getCurrentShift();
+      users = await api.getUsers();
+      showToast(`Nama kasir aktif berhasil diubah: ${cashierName}`);
+    } catch (err) {
+      showToast(`Gagal mengubah nama kasir: ${err}`);
+    }
+  }
+
+  async function handleAddNewCashier() {
+    const clean = newCashierNameInput.trim();
+    if (!clean) return;
+    try {
+      await api.createOrUpdateUser({ fullName: clean, role: "cashier" });
+      users = await api.getUsers();
+      newCashierNameInput = "";
+      showToast(`Kasir "${clean}" berhasil ditambahkan ke daftar!`);
+    } catch (err) {
+      showToast(`Gagal menambah kasir: ${err}`);
     }
   }
 
@@ -2806,6 +2841,84 @@
                 </div>
               </div>
             </div>
+
+            <!-- Manajemen Kasir & Operator Toko -->
+            <div class="bg-white border border-slate-200 rounded-lg p-5 shadow-xs space-y-4">
+              <h2 class="text-sm font-bold text-slate-900 border-b border-slate-200 pb-2 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <Users class="w-4 h-4 text-emerald-600" />
+                  <span>Daftar Kasir & Operator Toko</span>
+                </div>
+                <span class="text-xs font-normal text-slate-500">
+                  {users.length} Pengguna Terdaftar
+                </span>
+              </h2>
+
+              <p class="text-xs text-slate-600">
+                Nama-nama kasir yang didaftarkan di sini akan muncul sebagai pilihan cepat saat buka shift kasir dan tercetak resmi di struk nota belanja.
+              </p>
+
+              <!-- Form Tambah Kasir Baru -->
+              <div class="flex gap-2">
+                <input
+                  type="text"
+                  bind:value={newCashierNameInput}
+                  placeholder="Ketik nama kasir baru (misal: Siti Rahma)"
+                  class="flex-1 px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:border-emerald-600"
+                />
+                <button
+                  type="button"
+                  onclick={handleAddNewCashier}
+                  class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shrink-0"
+                >
+                  <Plus class="w-4 h-4" />
+                  <span>Tambah Kasir</span>
+                </button>
+              </div>
+
+              <!-- List Kasir -->
+              <div class="border border-slate-200 rounded-lg overflow-hidden">
+                <table class="w-full text-xs text-left">
+                  <thead class="bg-slate-100 text-slate-700 border-b border-slate-200">
+                    <tr>
+                      <th class="py-2 px-3 font-semibold">Nama Lengkap</th>
+                      <th class="py-2 px-3 font-semibold">Username</th>
+                      <th class="py-2 px-3 font-semibold">Peran</th>
+                      <th class="py-2 px-3 font-semibold text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100">
+                    {#each users as u}
+                      <tr class="hover:bg-slate-50 transition-colors">
+                        <td class="py-2.5 px-3 font-semibold text-slate-900 flex items-center gap-2">
+                          <span class="w-6 h-6 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 text-[10px] font-bold">
+                            {u.full_name.slice(0, 1).toUpperCase()}
+                          </span>
+                          <span>{u.full_name}</span>
+                          {#if currentShift?.cashier_id === u.id || currentShift?.cashier_name === u.full_name}
+                            <span class="px-1.5 py-0.5 rounded text-[10px] bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
+                              Sedang Bertugas
+                            </span>
+                          {/if}
+                        </td>
+                        <td class="py-2.5 px-3 text-slate-600 font-mono text-[11px]">{u.username}</td>
+                        <td class="py-2.5 px-3">
+                          <span class="px-2 py-0.5 rounded text-[10px] font-semibold capitalize {u.role === 'admin' ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-slate-100 text-slate-700 border border-slate-200'}">
+                            {u.role === 'admin' ? 'Admin' : 'Kasir'}
+                          </span>
+                        </td>
+                        <td class="py-2.5 px-3 text-right">
+                          <span class="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            Aktif
+                          </span>
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         {/if}
       {/if}
@@ -2831,10 +2944,12 @@
   <ShiftModal
     isOpen={isShiftModalOpen}
     {currentShift}
+    {users}
     onClose={() => (isShiftModalOpen = false)}
     onStartShift={handleStartShift}
     onCloseShift={handleCloseShift}
     onAddCashMovement={handleAddCashMovement}
+    onUpdateCashier={handleUpdateCashier}
   />
 
   <!-- MODAL TAMBAH PRODUK & MULTI-SATUAN (SPRINT 3) -->

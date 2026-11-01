@@ -40,6 +40,12 @@ impl Database {
         conn.execute_batch(schema::CREATE_TABLES_SQL)?;
         conn.execute_batch(schema::SEED_DATA_SQL)?;
 
+        // Bersihkan nama default lama jika masih ada 'Budi' di basis data lokal yang tersimpan
+        let _ = conn.execute(
+            "UPDATE users SET full_name = 'Kasir 1' WHERE full_name LIKE '%Budi%'",
+            [],
+        );
+
         println!("Database SQLite (WAL Mode) berhasil diinisialisasi di: {:?}", path);
 
         Ok(Database {
