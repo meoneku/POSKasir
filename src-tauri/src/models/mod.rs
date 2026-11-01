@@ -280,3 +280,88 @@ pub struct DashboardStats {
     pub total_products_count: i64,
     pub low_stock_count: i64,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StoreReceiptInfo {
+    pub name: String,
+    pub branch: String,
+    pub address: String,
+    pub phone: String,
+    pub npwp: String,
+    pub footer: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TransactionItemDetail {
+    pub id: String,
+    pub product_name: String,
+    pub unit_name: String,
+    pub quantity: i64,
+    pub unit_price: f64,
+    pub discount: f64,
+    pub subtotal: f64,
+    pub is_taxable: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PaymentDetail {
+    pub payment_method_name: String,
+    pub payment_method_code: String,
+    pub category: String,
+    pub amount_paid: f64,
+    pub change_due: f64,
+    pub reference_number: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TransactionDetail {
+    pub id: String,
+    pub invoice_number: String,
+    pub order_type: String,
+    pub cashier_name: String,
+    pub customer_name: Option<String>,
+    pub customer_phone: Option<String>,
+    pub subtotal: f64,
+    pub discount_total: f64,
+    pub tax_mode: String,
+    pub tax_base_amount: f64,
+    pub tax_total: f64,
+    pub grand_total: f64,
+    pub payment_status: String,
+    pub created_at: String,
+    pub items: Vec<TransactionItemDetail>,
+    pub payments: Vec<PaymentDetail>,
+    pub store_info: StoreReceiptInfo,
+    pub receipt_text_58mm: String,
+    pub receipt_text_80mm: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PaymentMethodSummary {
+    pub method_name: String,
+    pub transaction_count: i64,
+    pub total_amount: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ShiftReport {
+    pub shift_id: String,
+    pub cashier_name: String,
+    pub start_time: String,
+    pub end_time: Option<String>,
+    pub status: String,
+    pub starting_cash: f64,
+    pub cash_sales: f64,
+    pub non_cash_sales: f64,
+    pub cash_in: f64,
+    pub cash_out: f64,
+    pub expected_cash: f64,
+    pub actual_cash: Option<f64>,
+    pub cash_difference: Option<f64>,
+    pub total_transactions: i64,
+    pub total_sales: f64,
+    pub payment_summary: Vec<PaymentMethodSummary>,
+    pub notes: Option<String>,
+    pub report_text: String,
+}
+

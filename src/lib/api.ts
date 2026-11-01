@@ -18,6 +18,8 @@ import type {
   PurchaseHeader,
   CreateProductFullInput,
   StockAdjustmentInput,
+  TransactionDetail,
+  ShiftReport,
 } from "./types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -342,6 +344,93 @@ export const api = {
   async createCategory(name: string, description?: string): Promise<string> {
     if (!isTauri) return "cat-mock";
     return invoke("create_category", { name, description });
+  },
+
+  async getTransactionDetail(idOrInvoice: string): Promise<TransactionDetail> {
+    if (!isTauri) {
+      return {
+        id: "tx-mock",
+        invoice_number: idOrInvoice,
+        order_type: "retail",
+        cashier_name: "Kasir Utama (Budi)",
+        customer_name: "Pelanggan Umum",
+        customer_phone: undefined,
+        subtotal: 70000,
+        discount_total: 0,
+        tax_mode: "inclusive",
+        tax_base_amount: 63063,
+        tax_total: 6937,
+        grand_total: 70000,
+        payment_status: "paid",
+        created_at: new Date().toISOString(),
+        items: [
+          {
+            id: "ti-1",
+            product_name: "Minyak Goreng 2L",
+            unit_name: "Pouch",
+            quantity: 2,
+            unit_price: 35000,
+            discount: 0,
+            subtotal: 70000,
+            is_taxable: 1,
+          },
+        ],
+        payments: [
+          {
+            payment_method_name: "Uang Tunai",
+            payment_method_code: "cash",
+            category: "cash",
+            amount_paid: 100000,
+            change_due: 30000,
+          },
+        ],
+        store_info: {
+          name: "BERKAH POS KASIR",
+          branch: "Kantor Pusat",
+          address: "Jl. Perdagangan Niaga No. 88, Jakarta",
+          phone: "0812-3456-7890",
+          npwp: "01.234.567.8-901.000",
+          footer: "Terima Kasih Atas Kunjungan Anda!\nBarang yang sudah dibeli tidak dapat ditukar/dikembalikan.",
+        },
+        receipt_text_58mm: "BERKAH POS KASIR\nKantor Pusat\n--------------------------------\nNo: " + idOrInvoice + "\nKasir: Kasir Utama\n--------------------------------\nMinyak Goreng 2L\n  2 x Rp 35.000        Rp 70.000\n--------------------------------\nTOTAL AKHIR            Rp 70.000\nBayar (Tunai)         Rp 100.000\nKembali                Rp 30.000\n--------------------------------\nTerima Kasih Atas Kunjungan Anda!",
+        receipt_text_80mm: "BERKAH POS KASIR\nKantor Pusat\n------------------------------------------------\nNo: " + idOrInvoice + "\nKasir: Kasir Utama\n------------------------------------------------\nMinyak Goreng 2L\n  2 x Rp 35.000                                Rp 70.000\n------------------------------------------------\nTOTAL AKHIR                                    Rp 70.000\nBayar (Tunai)                                 Rp 100.000\nKembali                                        Rp 30.000\n------------------------------------------------\nTerima Kasih Atas Kunjungan Anda!",
+      };
+    }
+    return invoke("get_transaction_detail", { idOrInvoice });
+  },
+
+  async getShiftReport(shiftId: string): Promise<ShiftReport> {
+    if (!isTauri) {
+      return {
+        shift_id: shiftId,
+        cashier_name: "Kasir Utama (Budi)",
+        start_time: new Date().toISOString(),
+        end_time: undefined,
+        status: "open",
+        starting_cash: 500000,
+        cash_sales: 1250000,
+        non_cash_sales: 450000,
+        cash_in: 0,
+        cash_out: 50000,
+        expected_cash: 1700000,
+        actual_cash: undefined,
+        cash_difference: undefined,
+        total_transactions: 15,
+        total_sales: 1700000,
+        payment_summary: [
+          { method_name: "Uang Tunai", transaction_count: 10, total_amount: 1250000 },
+          { method_name: "QRIS", transaction_count: 5, total_amount: 450000 },
+        ],
+        notes: undefined,
+        report_text: "BERKAH POS KASIR\nRINGKASAN SHIFT (X-REPORT)\n================================\nKasir: Kasir Utama\nModal Kas Awal: Rp 500.000\nPenjualan Tunai: Rp 1.250.000\nKas Keluar: -Rp 50.000\n--------------------------------\nKAS SISTEM: Rp 1.700.000\n================================",
+      };
+    }
+    return invoke("get_shift_report", { shiftId });
+  },
+
+  async kickCashDrawer(): Promise<string> {
+    if (!isTauri) return "Laci kasir berhasil dipicu.";
+    return invoke("kick_cash_drawer");
   },
 
   initWebSocket(hostIp: string, port: number, onMessage: (event: WsEvent) => void): () => void {

@@ -242,3 +242,82 @@ export interface WsEvent {
   payload?: any;
   timestamp: string;
 }
+
+export interface StoreReceiptInfo {
+  name: string;
+  branch: string;
+  address: string;
+  phone: string;
+  npwp: string;
+  footer: string;
+}
+
+export interface TransactionItemDetail {
+  id: string;
+  product_name: string;
+  unit_name: string;
+  quantity: number;
+  unit_price: number;
+  discount: number;
+  subtotal: number;
+  is_taxable: number;
+}
+
+export interface PaymentDetail {
+  payment_method_name: string;
+  payment_method_code: string;
+  category: string;
+  amount_paid: number;
+  change_due: number;
+  reference_number?: string;
+}
+
+export interface TransactionDetail {
+  id: string;
+  invoice_number: string;
+  order_type: string;
+  cashier_name: string;
+  customer_name?: string;
+  customer_phone?: string;
+  subtotal: number;
+  discount_total: number;
+  tax_mode: string;
+  tax_base_amount: number;
+  tax_total: number;
+  grand_total: number;
+  payment_status: string;
+  created_at: string;
+  items: TransactionItemDetail[];
+  payments: PaymentDetail[];
+  store_info: StoreReceiptInfo;
+  receipt_text_58mm: string;
+  receipt_text_80mm: string;
+}
+
+export interface PaymentMethodSummary {
+  method_name: string;
+  transaction_count: number;
+  total_amount: number;
+}
+
+export interface ShiftReport {
+  shift_id: string;
+  cashier_name: string;
+  start_time: string;
+  end_time?: string;
+  status: string;
+  starting_cash: number;
+  cash_sales: number;
+  non_cash_sales: number;
+  cash_in: number;
+  cash_out: number;
+  expected_cash: number;
+  actual_cash?: number;
+  cash_difference?: number;
+  total_transactions: number;
+  total_sales: number;
+  payment_summary: PaymentMethodSummary[];
+  notes?: string;
+  report_text: string;
+}
+

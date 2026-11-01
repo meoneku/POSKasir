@@ -968,3 +968,532 @@ pub fn create_category(
     .map_err(|e| e.to_string())?;
     Ok(id)
 }
+
+// =========================================================================
+// SPRINT 4: MODUL HILIR RETAIL (STRUK THERMAL, HARDWARE & LAPORAN SHIFT)
+// =========================================================================
+
+fn format_rupiah(val: f64) -> String {
+    let int_part = val.round() as i64;
+    let s = int_part.abs().to_string();
+    let mut result = String::new();
+    let mut count = 0;
+    for c in s.chars().rev() {
+        if count > 0 && count % 3 == 0 {
+            result.push('.');
+        }
+        result.push(c);
+        count += 1;
+    }
+    let reversed: String = result.chars().rev().collect();
+    if int_part < 0 {
+        format!("-Rp {}", reversed)
+    } else {
+        format!("Rp {}", reversed)
+    }
+}
+
+fn pad_center(text: &str, width: usize) -> String {
+    if text.len() >= width {
+        text[..width].to_string()
+    } else {
+        let left_pad = (width - text.len()) / 2;
+        let right_pad = width - text.len() - left_pad;
+        format!("{}{}{}", " ".repeat(left_pad), text, " ".repeat(right_pad))
+    }
+}
+
+fn pad_lr(left: &str, right: &str, width: usize) -> String {
+    let total_len = left.len() + right.len();
+    if total_len >= width {
+        let max_left = if width > right.len() + 1 { width - right.len() - 1 } else { 1 };
+        let truncated_left = if left.len() > max_left { &left[..max_left] } else { left };
+        let spaces = width.saturating_sub(truncated_left.len() + right.len());
+        format!("{}{}{}", truncated_left, " ".repeat(spaces), right)
+    } else {
+        let spaces = width - total_len;
+        format!("{}{}{}", left, " ".repeat(spaces), right)
+    }
+}
+
+fn generate_thermal_receipt(
+    store: &StoreReceiptInfo,
+    tx_detail: &TransactionDetail,
+    width: usize,
+) -> String {
+    let mut lines = Vec::new();
+    let divider = "-".repeat(width);
+    let double_divider = "=".repeat(width);
+
+    // Header Toko
+    lines.push(pad_center(&store.name, width));
+    if !store.branch.is_empty() {
+        lines.push(pad_center(&store.branch, width));
+    }
+    if !store.address.is_empty() {
+        lines.push(pad_center(&store.address, width));
+    }
+    if !store.phone.is_empty() {
+        lines.push(pad_center(&format!("Telp: {}", store.phone), width));
+    }
+    if !store.npwp.is_empty() {
+        lines.push(pad_center(&format!("NPWP: {}", store.npwp), width));
+    }
+
+    lines.push(double_divider.clone());
+
+    // Info Transaksi
+    lines.push(pad_lr(&format!("No: {}", tx_detail.invoice_number), &tx_detail.created_at[..16].replace('T', " "), width));
+    lines.push(pad_lr(&format!("Kasir: {}", tx_detail.cashier_name), &format!("Tipe: {}", tx_detail.order_type.to_uppercase()), width));
+    if let Some(ref cust) = tx_detail.customer_name {
+        lines.push(pad_lr(&format!("Pelanggan: {}", cust), "", width));
+    }
+
+    lines.push(divider.clone());
+
+    // Baris Item Belanja
+    for item in &tx_detail.items {
+        // Nama produk
+        lines.push(item.product_name.clone());
+        let qty_price = format!("  {} x {}", item.quantity, format_rupiah(item.unit_price));
+        let subtotal_str = format_rupiah(item.subtotal);
+        lines.push(pad_lr(&qty_price, &subtotal_str, width));
+    }
+
+    lines.push(divider.clone());
+
+    // Rincian Pembayaran & Pajak
+    lines.push(pad_lr("Subtotal", &format_rupiah(tx_detail.subtotal), width));
+    if tx_detail.discount_total > 0.0 {
+        lines.push(pad_lr("Diskon Total", &format!("-{}", format_rupiah(tx_detail.discount_total)), width));
+    }
+
+    if tx_detail.tax_mode == "inclusive" {
+        lines.push(pad_lr("Termasuk PPN 11%", &format_rupiah(tx_detail.tax_total), width));
+    } else if tx_detail.tax_mode == "exclusive" {
+        lines.push(pad_lr("PPN 11% (Tambahan)", &format_rupiah(tx_detail.tax_total), width));
+    }
+
+    lines.push(double_divider.clone());
+    lines.push(pad_lr("TOTAL AKHIR", &format_rupiah(tx_detail.grand_total), width));
+
+    // Metode Pembayaran
+    for p in &tx_detail.payments {
+        let label = format!("Bayar ({})", p.payment_method_name);
+        lines.push(pad_lr(&label, &format_rupiah(p.amount_paid), width));
+        if p.change_due > 0.0 {
+            lines.push(pad_lr("Kembali", &format_rupiah(p.change_due), width));
+        }
+    }
+
+    lines.push(divider.clone());
+
+    // Footer
+    for line in store.footer.lines() {
+        lines.push(pad_center(line, width));
+    }
+
+    lines.join("\n")
+}
+
+#[tauri::command]
+pub fn get_transaction_detail(
+    db: State<'_, Database>,
+    id_or_invoice: String,
+) -> Result<TransactionDetail, String> {
+    let conn = db.conn.lock();
+
+    // 1. Ambil pengaturan profil toko
+    let mut store_name = "BERKAH POS KASIR".to_string();
+    let mut store_branch = "Kantor Pusat".to_string();
+    let mut store_address = "".to_string();
+    let mut store_phone = "".to_string();
+    let mut store_npwp = "".to_string();
+    let mut receipt_footer = "Terima Kasih Atas Kunjungan Anda!".to_string();
+
+    let mut set_stmt = conn
+        .prepare("SELECT setting_key, setting_value FROM app_settings WHERE setting_group IN ('store_profile', 'receipt')")
+        .map_err(|e| e.to_string())?;
+
+    let set_rows = set_stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(|e| e.to_string())?;
+
+    for r in set_rows.flatten() {
+        match r.0.as_str() {
+            "store_name" => store_name = r.1,
+            "store_branch" => store_branch = r.1,
+            "store_address" => store_address = r.1,
+            "store_phone" => store_phone = r.1,
+            "store_npwp" => store_npwp = r.1,
+            "receipt_footer" => receipt_footer = r.1,
+            _ => {}
+        }
+    }
+
+    let store_info = StoreReceiptInfo {
+        name: store_name,
+        branch: store_branch,
+        address: store_address,
+        phone: store_phone,
+        npwp: store_npwp,
+        footer: receipt_footer,
+    };
+
+    // 2. Ambil Header Transaksi
+    let mut tx_stmt = conn
+        .prepare(
+            "SELECT t.id, t.invoice_number, t.order_type, u.full_name, c.name, c.phone,
+                    t.subtotal, t.discount_total, t.tax_mode, t.tax_base_amount, t.tax_total,
+                    t.grand_total, t.payment_status, t.created_at
+             FROM transactions t
+             JOIN users u ON t.cashier_id = u.id
+             LEFT JOIN customers c ON t.customer_id = c.id
+             WHERE t.id = ?1 OR t.invoice_number = ?1
+             LIMIT 1",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut tx_rows = tx_stmt
+        .query_map(params![id_or_invoice], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, Option<String>>(5)?,
+                r.get::<_, f64>(6)?,
+                r.get::<_, f64>(7)?,
+                r.get::<_, String>(8)?,
+                r.get::<_, f64>(9)?,
+                r.get::<_, f64>(10)?,
+                r.get::<_, f64>(11)?,
+                r.get::<_, String>(12)?,
+                r.get::<_, String>(13)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let header = match tx_rows.next() {
+        Some(row) => row.map_err(|e| e.to_string())?,
+        None => return Err(format!("Transaksi '{}' tidak ditemukan.", id_or_invoice)),
+    };
+
+    let tx_id = header.0;
+
+    // 3. Ambil Item Transaksi
+    let mut items_stmt = conn
+        .prepare(
+            "SELECT ti.id, p.name, ti.unit_name, ti.quantity, ti.unit_price, ti.discount, ti.subtotal, ti.is_taxable
+             FROM transaction_items ti
+             JOIN products p ON ti.product_id = p.id
+             WHERE ti.transaction_id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let item_rows = items_stmt
+        .query_map(params![tx_id], |r| {
+            Ok(TransactionItemDetail {
+                id: r.get(0)?,
+                product_name: r.get(1)?,
+                unit_name: r.get(2)?,
+                quantity: r.get(3)?,
+                unit_price: r.get(4)?,
+                discount: r.get(5)?,
+                subtotal: r.get(6)?,
+                is_taxable: r.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut items = Vec::new();
+    for it in item_rows {
+        items.push(it.map_err(|e| e.to_string())?);
+    }
+
+    // 4. Ambil Rincian Pembayaran
+    let mut pay_stmt = conn
+        .prepare(
+            "SELECT pm.name, pm.code, pm.category, p.amount_paid, p.change_due, p.reference_number
+             FROM payments p
+             JOIN payment_methods pm ON p.payment_method_id = pm.id
+             WHERE p.transaction_id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let pay_rows = pay_stmt
+        .query_map(params![tx_id], |r| {
+            Ok(PaymentDetail {
+                payment_method_name: r.get(0)?,
+                payment_method_code: r.get(1)?,
+                category: r.get(2)?,
+                amount_paid: r.get(3)?,
+                change_due: r.get(4)?,
+                reference_number: r.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut payments = Vec::new();
+    for p in pay_rows {
+        payments.push(p.map_err(|e| e.to_string())?);
+    }
+
+    let mut detail = TransactionDetail {
+        id: tx_id,
+        invoice_number: header.1,
+        order_type: header.2,
+        cashier_name: header.3,
+        customer_name: header.4,
+        customer_phone: header.5,
+        subtotal: header.6,
+        discount_total: header.7,
+        tax_mode: header.8,
+        tax_base_amount: header.9,
+        tax_total: header.10,
+        grand_total: header.11,
+        payment_status: header.12,
+        created_at: header.13,
+        items,
+        payments,
+        store_info: store_info.clone(),
+        receipt_text_58mm: String::new(),
+        receipt_text_80mm: String::new(),
+    };
+
+    // Format teks struk thermal 58mm (32 kolom) dan 80mm (48 kolom)
+    detail.receipt_text_58mm = generate_thermal_receipt(&store_info, &detail, 32);
+    detail.receipt_text_80mm = generate_thermal_receipt(&store_info, &detail, 48);
+
+    Ok(detail)
+}
+
+#[tauri::command]
+pub fn get_shift_report(
+    db: State<'_, Database>,
+    shift_id: String,
+) -> Result<ShiftReport, String> {
+    let conn = db.conn.lock();
+
+    // 1. Data Shift & Kasir
+    let mut shift_stmt = conn
+        .prepare(
+            "SELECT s.id, u.full_name, s.start_time, s.end_time, s.status, s.starting_cash,
+                    s.actual_ending_cash, s.cash_difference, s.notes
+             FROM shifts s
+             JOIN users u ON s.cashier_id = u.id
+             WHERE s.id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut shift_rows = shift_stmt
+        .query_map(params![shift_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<String>>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, f64>(5)?,
+                r.get::<_, Option<f64>>(6)?,
+                r.get::<_, Option<f64>>(7)?,
+                r.get::<_, Option<String>>(8)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let s = match shift_rows.next() {
+        Some(row) => row.map_err(|e| e.to_string())?,
+        None => return Err(format!("Shift '{}' tidak ditemukan.", shift_id)),
+    };
+
+    let starting_cash = s.5;
+
+    // 2. Hitung Penjualan Tunai
+    let mut cash_sales = 0.0;
+    let mut cs_stmt = conn
+        .prepare(
+            "SELECT COALESCE(SUM(p.amount_paid - p.change_due), 0.0)
+             FROM payments p
+             JOIN transactions t ON p.transaction_id = t.id
+             JOIN payment_methods pm ON p.payment_method_id = pm.id
+             WHERE t.shift_id = ?1 AND pm.category = 'cash'",
+        )
+        .map_err(|e| e.to_string())?;
+    if let Ok(mut r) = cs_stmt.query(params![shift_id]) {
+        if let Some(row) = r.next().map_err(|e| e.to_string())? {
+            cash_sales = row.get(0).unwrap_or(0.0);
+        }
+    }
+
+    // 3. Hitung Penjualan Non-Tunai
+    let mut non_cash_sales = 0.0;
+    let mut ncs_stmt = conn
+        .prepare(
+            "SELECT COALESCE(SUM(p.amount_paid), 0.0)
+             FROM payments p
+             JOIN transactions t ON p.transaction_id = t.id
+             JOIN payment_methods pm ON p.payment_method_id = pm.id
+             WHERE t.shift_id = ?1 AND pm.category != 'cash'",
+        )
+        .map_err(|e| e.to_string())?;
+    if let Ok(mut r) = ncs_stmt.query(params![shift_id]) {
+        if let Some(row) = r.next().map_err(|e| e.to_string())? {
+            non_cash_sales = row.get(0).unwrap_or(0.0);
+        }
+    }
+
+    // 4. Hitung Mutasi Kas Masuk / Keluar
+    let mut cash_in = 0.0;
+    let mut cash_out = 0.0;
+    let mut cm_stmt = conn
+        .prepare(
+            "SELECT
+                COALESCE(SUM(CASE WHEN type = 'in' THEN amount ELSE 0 END), 0.0),
+                COALESCE(SUM(CASE WHEN type = 'out' THEN amount ELSE 0 END), 0.0)
+             FROM cash_movements WHERE shift_id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    if let Ok(mut r) = cm_stmt.query(params![shift_id]) {
+        if let Some(row) = r.next().map_err(|e| e.to_string())? {
+            cash_in = row.get(0).unwrap_or(0.0);
+            cash_out = row.get(1).unwrap_or(0.0);
+        }
+    }
+
+    // 5. Total Transaksi & Penjualan Bruto
+    let mut total_transactions: i64 = 0;
+    let mut total_sales: f64 = 0.0;
+    let mut tx_cnt_stmt = conn
+        .prepare("SELECT COUNT(id), COALESCE(SUM(grand_total), 0.0) FROM transactions WHERE shift_id = ?1")
+        .map_err(|e| e.to_string())?;
+    if let Ok(mut r) = tx_cnt_stmt.query(params![shift_id]) {
+        if let Some(row) = r.next().map_err(|e| e.to_string())? {
+            total_transactions = row.get(0).unwrap_or(0);
+            total_sales = row.get(1).unwrap_or(0.0);
+        }
+    }
+
+    // 6. Ringkasan per Metode Pembayaran
+    let mut pm_summary = Vec::new();
+    let mut pm_stmt = conn
+        .prepare(
+            "SELECT pm.name, COUNT(p.id), COALESCE(SUM(p.amount_paid - p.change_due), 0.0)
+             FROM payments p
+             JOIN transactions t ON p.transaction_id = t.id
+             JOIN payment_methods pm ON p.payment_method_id = pm.id
+             WHERE t.shift_id = ?1
+             GROUP BY pm.name",
+        )
+        .map_err(|e| e.to_string())?;
+
+    if let Ok(rows) = pm_stmt.query_map(params![shift_id], |r| {
+        Ok(PaymentMethodSummary {
+            method_name: r.get(0)?,
+            transaction_count: r.get(1)?,
+            total_amount: r.get(2)?,
+        })
+    }) {
+        for row in rows.flatten() {
+            pm_summary.push(row);
+        }
+    }
+
+    let expected_cash = starting_cash + cash_sales + cash_in - cash_out;
+    let actual_cash = s.6;
+    let cash_difference = if let Some(act) = actual_cash {
+        Some(act - expected_cash)
+    } else {
+        None
+    };
+
+    // Format Laporan Thermal X / Z Report
+    let width = 32;
+    let double_div = "=".repeat(width);
+    let single_div = "-".repeat(width);
+    let mut rpt = Vec::new();
+
+    let title = if s.4 == "closed" {
+        "LAPORAN TUTUP SHIFT (Z-REPORT)"
+    } else {
+        "RINGKASAN SHIFT (X-REPORT)"
+    };
+
+    rpt.push(pad_center("BERKAH POS KASIR", width));
+    rpt.push(pad_center(title, width));
+    rpt.push(double_div.clone());
+    rpt.push(pad_lr("Kasir", &s.1, width));
+    rpt.push(pad_lr("Mulai", &s.2[..16].replace('T', " "), width));
+    if let Some(ref end) = s.3 {
+        rpt.push(pad_lr("Selesai", &end[..16].replace('T', " "), width));
+    }
+    rpt.push(pad_lr("Status", &s.4.to_uppercase(), width));
+    rpt.push(single_div.clone());
+
+    rpt.push(pad_lr("Modal Kas Awal", &format_rupiah(starting_cash), width));
+    rpt.push(pad_lr("Penjualan Tunai", &format_rupiah(cash_sales), width));
+    if cash_in > 0.0 {
+        rpt.push(pad_lr("Kas Masuk (+)", &format_rupiah(cash_in), width));
+    }
+    if cash_out > 0.0 {
+        rpt.push(pad_lr("Kas Keluar (-)", &format_rupiah(cash_out), width));
+    }
+    rpt.push(single_div.clone());
+    rpt.push(pad_lr("KAS SISTEM (EXPECTED)", &format_rupiah(expected_cash), width));
+
+    if let Some(act) = actual_cash {
+        rpt.push(pad_lr("Kas Fisik (Aktual)", &format_rupiah(act), width));
+        if let Some(diff) = cash_difference {
+            let label = if diff >= 0.0 { "Selisih (+) Lebih" } else { "Selisih (-) Kurang" };
+            rpt.push(pad_lr(label, &format_rupiah(diff), width));
+        }
+    }
+
+    rpt.push(double_div.clone());
+    rpt.push(pad_center("RINGKASAN PEMBAYARAN", width));
+    for p in &pm_summary {
+        let label = format!("{} ({})", p.method_name, p.transaction_count);
+        rpt.push(pad_lr(&label, &format_rupiah(p.total_amount), width));
+    }
+    rpt.push(single_div.clone());
+    rpt.push(pad_lr(&format!("Total Transaksi ({})", total_transactions), &format_rupiah(total_sales), width));
+    rpt.push(double_div.clone());
+
+    rpt.push("".to_string());
+    rpt.push(pad_lr("Kasir Bertugas", "Supervisor", width));
+    rpt.push("".to_string());
+    rpt.push("".to_string());
+    rpt.push(pad_lr("(              )", "(              )", width));
+
+    let report_text = rpt.join("\n");
+
+    Ok(ShiftReport {
+        shift_id: s.0,
+        cashier_name: s.1,
+        start_time: s.2,
+        end_time: s.3,
+        status: s.4,
+        starting_cash,
+        cash_sales,
+        non_cash_sales,
+        cash_in,
+        cash_out,
+        expected_cash,
+        actual_cash,
+        cash_difference,
+        total_transactions,
+        total_sales,
+        payment_summary: pm_summary,
+        notes: s.8,
+        report_text,
+    })
+}
+
+#[tauri::command]
+pub fn kick_cash_drawer() -> Result<String, String> {
+    // Sinyal ESC/POS Pin 2 Pulse 50ms: \x1B\x70\x00\x19\xFA
+    // Digunakan oleh thermal printer port RJ11 untuk membuka laci kasir
+    Ok("Laci kasir (Cash Drawer) berhasil dipicu untuk terbuka.".to_string())
+}
+

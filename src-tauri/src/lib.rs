@@ -66,6 +66,9 @@ pub fn run() {
             commands::create_product_full,
             commands::adjust_stock,
             commands::create_category,
+            commands::get_transaction_detail,
+            commands::get_shift_report,
+            commands::kick_cash_drawer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -31,6 +31,9 @@
   import CreatePOModal from "$lib/components/CreatePOModal.svelte";
   import AddSupplierModal from "$lib/components/AddSupplierModal.svelte";
   import StockOpnameModal from "$lib/components/StockOpnameModal.svelte";
+  import ReceiptModal from "$lib/components/ReceiptModal.svelte";
+  import HeldCartsModal from "$lib/components/HeldCartsModal.svelte";
+  import EditQtyModal from "$lib/components/EditQtyModal.svelte";
 
   import { api } from "$lib/api";
   import type {
@@ -52,6 +55,7 @@
     CreateSupplierInput,
     CreateProductFullInput,
     StockAdjustmentInput,
+    TransactionDetail,
   } from "$lib/types";
 
   // --- REAKTIF STATE (SVELTE 5 RUNES) ---
@@ -83,6 +87,7 @@
   let searchQuery = $state("");
   let selectedCategoryId = $state<string | null>(null);
   let cart = $state<CartItem[]>([]);
+  let selectedCartIndex = $state<number>(0);
   let heldCarts = $state<{ id: string; name: string; items: CartItem[]; time: string }[]>([]);
   let selectedWholesaleCustomerId = $state<string | null>(null);
 
@@ -93,6 +98,10 @@
   let isCreatePOModalOpen = $state(false);
   let isAddSupplierModalOpen = $state(false);
   let isStockOpnameModalOpen = $state(false);
+  let isReceiptModalOpen = $state(false);
+  let activeReceiptDetail = $state<TransactionDetail | null>(null);
+  let isHeldCartsModalOpen = $state(false);
+  let isEditQtyModalOpen = $state(false);
   let procurementSubTab = $state<"po" | "suppliers" | "debt">("po");
 
   // Input Field References
@@ -148,33 +157,148 @@
     })
   );
 
+  // --- AUDIO SYNTHESIZER UNTUK BEEP KASIR / SCANNER ---
+  function playScannerBeep() {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(1760, ctx.currentTime); // 1760Hz crisp tone
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.08);
+    } catch (e) {
+      // Abaikan jika audio tidak didukung
+    }
+  }
+
+  function handleBarcodeScan(code: string) {
+    const clean = code.trim();
+    if (!clean) return;
+
+    // 1. Cari kecocokan barcode produk atau SKU
+    for (const p of products) {
+      if (p.barcode === clean || p.sku.toLowerCase() === clean.toLowerCase()) {
+        addToCart(p, p.units[0]);
+        playScannerBeep();
+        showToast(`Scan Barcode: ${p.name}`);
+        return;
+      }
+      // 2. Cari kecocokan barcode satuan bertingkat (misal barcode kemasan Dus/Pak)
+      for (const u of p.units) {
+        if (u.barcode === clean) {
+          addToCart(p, u);
+          playScannerBeep();
+          showToast(`Scan Barcode (${u.unit_name}): ${p.name}`);
+          return;
+        }
+      }
+    }
+
+    showToast(`Barcode tidak ditemukan: ${clean}`);
+  }
+
   // --- LIFECYCLE & GLOBAL LISTENERS ---
   onMount(() => {
     loadAllData();
 
+    let barcodeBuffer = "";
+    let lastKeyTime = 0;
+
     // Global Barcode & Shortcut Listener
     const handleGlobalKeydown = (e: KeyboardEvent) => {
-      // Jangan ganggu input teks jika modal sedang terbuka
-      if (isPaymentModalOpen || isShiftModalOpen || isAddProductModalOpen) return;
+      const isAnyModalOpen =
+        isPaymentModalOpen ||
+        isShiftModalOpen ||
+        isAddProductModalOpen ||
+        isCreatePOModalOpen ||
+        isAddSupplierModalOpen ||
+        isStockOpnameModalOpen ||
+        isReceiptModalOpen ||
+        isHeldCartsModalOpen ||
+        isEditQtyModalOpen;
 
-      if (e.key === "F2") {
-        e.preventDefault();
-        activeTab = "pos";
-        searchInputRef?.focus();
-        searchInputRef?.select();
-      } else if (e.key === "F8") {
-        e.preventDefault();
-        holdCurrentCart();
-      } else if (e.key === "F9") {
-        e.preventDefault();
-        recallLastHeldCart();
-      } else if (e.key === "F12") {
-        e.preventDefault();
-        if (cart.length > 0) {
-          isPaymentModalOpen = true;
-        } else {
-          showToast("Keranjang belanja masih kosong!");
+      // ESC: Menutup dialog aktif
+      if (e.key === "Escape") {
+        if (isReceiptModalOpen) {
+          isReceiptModalOpen = false;
+          return;
         }
+        if (isHeldCartsModalOpen) {
+          isHeldCartsModalOpen = false;
+          return;
+        }
+        if (isEditQtyModalOpen) {
+          isEditQtyModalOpen = false;
+          return;
+        }
+      }
+
+      // Keyboard Shortcuts kasir hanya aktif saat tidak ada modal terbuka
+      if (!isAnyModalOpen) {
+        if (e.key === "F2") {
+          e.preventDefault();
+          activeTab = "pos";
+          searchInputRef?.focus();
+          searchInputRef?.select();
+          return;
+        } else if (e.key === "F4") {
+          e.preventDefault();
+          if (cart.length > 0) {
+            selectedCartIndex = Math.min(selectedCartIndex, cart.length - 1);
+            isEditQtyModalOpen = true;
+          } else {
+            showToast("Keranjang belanja masih kosong!");
+          }
+          return;
+        } else if (e.key === "F8") {
+          e.preventDefault();
+          holdCurrentCart();
+          return;
+        } else if (e.key === "F9") {
+          e.preventDefault();
+          isHeldCartsModalOpen = true;
+          return;
+        } else if (e.key === "F12") {
+          e.preventDefault();
+          if (cart.length > 0) {
+            isPaymentModalOpen = true;
+          } else {
+            showToast("Keranjang belanja masih kosong!");
+          }
+          return;
+        }
+      }
+
+      // Deteksi Kecepatan Input Hardware Barcode Scanner USB HID
+      // Scanner barcode mengetik karakter berturut-turut dalam interval < 45 milidetik diakhiri Enter
+      const now = Date.now();
+      const diff = now - lastKeyTime;
+      lastKeyTime = now;
+
+      const isInputActive =
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA";
+
+      if (e.key === "Enter") {
+        if (barcodeBuffer.length >= 3 && (diff < 50 || !isInputActive)) {
+          e.preventDefault();
+          handleBarcodeScan(barcodeBuffer);
+          barcodeBuffer = "";
+          return;
+        }
+        barcodeBuffer = "";
+      } else if (e.key.length === 1) {
+        if (diff > 60 && barcodeBuffer.length > 0) {
+          barcodeBuffer = "";
+        }
+        barcodeBuffer += e.key;
       }
     };
 
@@ -460,6 +584,50 @@
     showToast(`Nota '${last.name}' berhasil dimuat kembali!`);
   }
 
+  function handleRecallHeldCart(cartId: string) {
+    const target = heldCarts.find((c) => c.id === cartId);
+    if (target) {
+      cart = [...target.items];
+      heldCarts = heldCarts.filter((c) => c.id !== cartId);
+      isHeldCartsModalOpen = false;
+      showToast(`Nota '${target.name}' dimuat kembali!`);
+    }
+  }
+
+  function handleDeleteHeldCart(cartId: string) {
+    heldCarts = heldCarts.filter((c) => c.id !== cartId);
+    showToast("Nota tertahan dibatalkan.");
+  }
+
+  function handleSaveEditedQty(newQty: number) {
+    if (selectedCartIndex >= 0 && selectedCartIndex < cart.length) {
+      const updated = [...cart];
+      updated[selectedCartIndex].quantity = newQty;
+      const unit = updated[selectedCartIndex].selected_unit;
+      if (unit.min_qty_wholesale_2 && newQty >= unit.min_qty_wholesale_2 && unit.wholesale_price_2) {
+        updated[selectedCartIndex].unit_price = unit.wholesale_price_2;
+      } else if (unit.min_qty_wholesale_1 && newQty >= unit.min_qty_wholesale_1 && unit.wholesale_price_1) {
+        updated[selectedCartIndex].unit_price = unit.wholesale_price_1;
+      } else {
+        updated[selectedCartIndex].unit_price = unit.retail_price;
+      }
+      updated[selectedCartIndex].subtotal = updated[selectedCartIndex].quantity * updated[selectedCartIndex].unit_price;
+      cart = updated;
+      isEditQtyModalOpen = false;
+      showToast(`Jumlah diubah menjadi ${newQty} ${unit.unit_name}`);
+    }
+  }
+
+  async function openReceiptForTransaction(idOrInvoice: string) {
+    try {
+      const detail = await api.getTransactionDetail(idOrInvoice);
+      activeReceiptDetail = detail;
+      isReceiptModalOpen = true;
+    } catch (err) {
+      showToast(`Gagal memuat struk: ${err}`);
+    }
+  }
+
   // --- TRANSAKSI CHECKOUT ---
   async function handleConfirmPayment(methodId: string, amountPaid: number, changeDue: number) {
     try {
@@ -497,7 +665,16 @@
       const invoiceNum = await api.createTransaction(payload);
       isPaymentModalOpen = false;
       cart = [];
-      showToast(`Transaksi ${invoiceNum} Berhasil! Struk Tercetak.`);
+      showToast(`Transaksi ${invoiceNum} Berhasil!`);
+
+      // Buka otomatis Struk Thermal Preview
+      try {
+        const detail = await api.getTransactionDetail(invoiceNum);
+        activeReceiptDetail = detail;
+        isReceiptModalOpen = true;
+      } catch (e) {
+        console.warn("Gagal membuka struk transaksi otomatis:", e);
+      }
 
       // Refresh data produk untuk stok terkini
       products = await api.getProducts();
@@ -596,6 +773,12 @@
                     type="text"
                     placeholder="Cari Nama Produk, SKU, atau Scan Barcode (F2)..."
                     bind:value={searchQuery}
+                    onkeydown={(e) => {
+                      if (e.key === "Enter" && filteredProducts.length === 1) {
+                        addToCart(filteredProducts[0]);
+                        searchQuery = "";
+                      }
+                    }}
                     class="w-full pl-9 pr-4 py-2 bg-slate-100 border border-slate-300 rounded-lg text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
                   />
                   {#if searchQuery}
@@ -702,16 +885,31 @@
                   </div>
                 {:else}
                   {#each cart as item, idx}
-                    <div class="py-2.5 first:pt-0 last:pb-0 space-y-1.5">
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div
+                      onclick={() => (selectedCartIndex = idx)}
+                      class="transition-all cursor-pointer {selectedCartIndex === idx
+                        ? 'p-2 bg-emerald-50/70 border border-emerald-400 rounded-lg shadow-2xs space-y-1.5'
+                        : 'py-2.5 first:pt-0 last:pb-0 space-y-1.5 border-b border-slate-100'}"
+                    >
                       <div class="flex justify-between items-start gap-2">
                         <div class="flex-1">
-                          <div class="font-semibold text-slate-900 text-xs line-clamp-1">{item.product.name}</div>
+                          <div class="font-semibold text-slate-900 text-xs line-clamp-1 flex items-center gap-1.5">
+                            {#if selectedCartIndex === idx}
+                              <span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                            {/if}
+                            <span>{item.product.name}</span>
+                          </div>
                           <div class="text-[11px] text-slate-500 font-mono">
                             @ Rp {item.unit_price.toLocaleString("id-ID")}
                           </div>
                         </div>
                         <button
-                          onclick={() => removeFromCart(idx)}
+                          onclick={(e) => {
+                            e.stopPropagation();
+                            removeFromCart(idx);
+                          }}
                           class="text-slate-300 hover:text-rose-600 transition-colors p-1"
                           title="Hapus baris"
                         >
@@ -735,19 +933,34 @@
                           <span class="text-[11px] text-slate-500">{item.selected_unit.unit_name}</span>
                         {/if}
 
-                        <!-- Pengatur Kuantitas (+ / -) -->
+                        <!-- Pengatur Kuantitas (+ / -) & Klik untuk Edit Qty (F4) -->
                         <div class="flex items-center gap-1">
                           <button
-                            onclick={() => updateQuantity(idx, -1)}
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              updateQuantity(idx, -1);
+                            }}
                             class="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 border border-slate-300 flex items-center justify-center text-slate-700 active:scale-95"
                           >
                             <Minus class="w-3 h-3" />
                           </button>
-                          <span class="w-8 text-center font-bold font-mono text-xs text-slate-900">
-                            {item.quantity}
-                          </span>
                           <button
-                            onclick={() => updateQuantity(idx, 1)}
+                            type="button"
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              selectedCartIndex = idx;
+                              isEditQtyModalOpen = true;
+                            }}
+                            title="Klik untuk ubah kuantitas (Shortcut F4)"
+                            class="w-8 py-0.5 text-center font-bold font-mono text-xs text-slate-900 bg-white hover:bg-emerald-50 hover:text-emerald-800 rounded border border-slate-200"
+                          >
+                            {item.quantity}
+                          </button>
+                          <button
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              updateQuantity(idx, 1);
+                            }}
                             class="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 border border-slate-300 flex items-center justify-center text-slate-700 active:scale-95"
                           >
                             <Plus class="w-3 h-3" />
@@ -800,7 +1013,7 @@
                     <span>Tahan (F8)</span>
                   </button>
                   <button
-                    onclick={recallLastHeldCart}
+                    onclick={() => (isHeldCartsModalOpen = true)}
                     disabled={heldCarts.length === 0}
                     class="py-1.5 px-2 bg-slate-200 hover:bg-slate-300 disabled:opacity-40 text-slate-800 rounded text-xs font-medium flex items-center justify-center gap-1 border border-slate-300"
                   >
@@ -1276,12 +1489,13 @@
                     <th class="py-2.5 px-3 text-right">PPN</th>
                     <th class="py-2.5 px-3 text-right">Total Akhir</th>
                     <th class="py-2.5 px-3 text-center">Waktu</th>
+                    <th class="py-2.5 px-3 text-center">Aksi</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 text-slate-800">
                   {#if recentTransactions.length === 0}
                     <tr>
-                      <td colspan="8" class="text-center py-8 text-slate-400">Belum ada riwayat transaksi</td>
+                      <td colspan="9" class="text-center py-8 text-slate-400">Belum ada riwayat transaksi</td>
                     </tr>
                   {:else}
                     {#each recentTransactions as tx}
@@ -1301,6 +1515,17 @@
                         </td>
                         <td class="py-2.5 px-3 text-center text-slate-500 font-mono text-[11px]">
                           {new Date(tx.created_at).toLocaleTimeString("id-ID")}
+                        </td>
+                        <td class="py-2.5 px-3 text-center">
+                          <button
+                            type="button"
+                            onclick={() => openReceiptForTransaction(tx.invoice_number)}
+                            class="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded text-[11px] font-semibold flex items-center gap-1 mx-auto transition-colors"
+                            title="Buka & Cetak Struk Thermal"
+                          >
+                            <Printer class="w-3 h-3 text-emerald-700" />
+                            <span>Struk</span>
+                          </button>
                         </td>
                       </tr>
                     {/each}
@@ -1544,5 +1769,29 @@
     {products}
     onClose={() => (isStockOpnameModalOpen = false)}
     onSubmit={handleAdjustStock}
+  />
+
+  <!-- MODAL STRUK THERMAL 58MM / 80MM (SPRINT 4) -->
+  <ReceiptModal
+    isOpen={isReceiptModalOpen}
+    transaction={activeReceiptDetail}
+    onClose={() => (isReceiptModalOpen = false)}
+  />
+
+  <!-- MODAL TRANSAKSI TERTAHAN / HELD CARTS (SPRINT 4) -->
+  <HeldCartsModal
+    isOpen={isHeldCartsModalOpen}
+    {heldCarts}
+    onClose={() => (isHeldCartsModalOpen = false)}
+    onRecall={handleRecallHeldCart}
+    onDelete={handleDeleteHeldCart}
+  />
+
+  <!-- MODAL UBAH KUANTITAS BARIS AKTIF (F4) (SPRINT 4) -->
+  <EditQtyModal
+    isOpen={isEditQtyModalOpen}
+    item={cart[selectedCartIndex] || null}
+    onClose={() => (isEditQtyModalOpen = false)}
+    onSaveQty={handleSaveEditedQty}
   />
 </div>
