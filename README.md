@@ -101,4 +101,4 @@ Aplikasi ini tersedia untuk seluruh sistem operasi desktop:
 
 ## 📄 Lisensi
 
-Hak Cipta &copy; 2026 Tim POS Kasir Desktop. Didistribusikan di bawah lisensi terbuka [MIT](LICENSE).
+Hak Cipta &copy; 2026 Latansa Software. Didistribusikan di bawah lisensi terbuka [MIT](LICENSE).
