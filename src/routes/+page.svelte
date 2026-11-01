@@ -27,6 +27,10 @@
   import Skeleton from "$lib/components/Skeleton.svelte";
   import PaymentModal from "$lib/components/PaymentModal.svelte";
   import ShiftModal from "$lib/components/ShiftModal.svelte";
+  import AddProductModal from "$lib/components/AddProductModal.svelte";
+  import CreatePOModal from "$lib/components/CreatePOModal.svelte";
+  import AddSupplierModal from "$lib/components/AddSupplierModal.svelte";
+  import StockOpnameModal from "$lib/components/StockOpnameModal.svelte";
 
   import { api } from "$lib/api";
   import type {
@@ -43,6 +47,11 @@
     TransactionHeader,
     DashboardStats,
     ServerInfo,
+    PurchaseHeader,
+    CreatePurchaseInput,
+    CreateSupplierInput,
+    CreateProductFullInput,
+    StockAdjustmentInput,
   } from "$lib/types";
 
   // --- REAKTIF STATE (SVELTE 5 RUNES) ---
@@ -59,6 +68,10 @@
   let currentShift = $state<Shift | null>(null);
   let customers = $state<Customer[]>([]);
   let suppliers = $state<Supplier[]>([]);
+  let purchases = $state<PurchaseHeader[]>([]);
+  let unpaidPurchases = $derived(
+    purchases.filter((p) => p.payment_type === "credit" && p.total_amount > p.paid_amount)
+  );
   let recentTransactions = $state<TransactionHeader[]>([]);
   let dashboardStats = $state<DashboardStats | null>(null);
   let serverInfo = $state<ServerInfo | null>(null);
@@ -73,10 +86,14 @@
   let heldCarts = $state<{ id: string; name: string; items: CartItem[]; time: string }[]>([]);
   let selectedWholesaleCustomerId = $state<string | null>(null);
 
-  // Modals State
+  // Modals & Subtabs State
   let isPaymentModalOpen = $state(false);
   let isShiftModalOpen = $state(false);
   let isAddProductModalOpen = $state(false);
+  let isCreatePOModalOpen = $state(false);
+  let isAddSupplierModalOpen = $state(false);
+  let isStockOpnameModalOpen = $state(false);
+  let procurementSubTab = $state<"po" | "suppliers" | "debt">("po");
 
   // Input Field References
   let searchInputRef = $state<HTMLInputElement | null>(null);
@@ -168,7 +185,7 @@
   async function loadAllData() {
     isLoading = true;
     try {
-      const [s, c, p, t, pm, sh, cust, sup, r, ds, srv] = await Promise.all([
+      const [s, c, p, t, pm, sh, cust, sup, r, ds, srv, po] = await Promise.all([
         api.getStoreSettings(),
         api.getCategories(),
         api.getProducts(),
@@ -180,6 +197,7 @@
         api.getRecentTransactions(),
         api.getDashboardStats(),
         api.getServerStatus(),
+        api.getPurchases(),
       ]);
       settings = s;
       categories = c;
@@ -192,6 +210,7 @@
       recentTransactions = r;
       dashboardStats = ds;
       serverInfo = srv;
+      purchases = po;
       if (srv) {
         serverPortInput = srv.port;
       }
@@ -203,6 +222,75 @@
       setTimeout(() => {
         isLoading = false;
       }, 150);
+    }
+  }
+
+  // --- HANDLER MODUL HULU & INVENTARIS (SPRINT 3) ---
+  async function handleCreateProductFull(input: CreateProductFullInput) {
+    try {
+      await api.createProductFull(input);
+      products = await api.getProducts();
+      dashboardStats = await api.getDashboardStats();
+      isAddProductModalOpen = false;
+      showToast(`Produk ${input.name} berhasil ditambahkan!`);
+    } catch (err) {
+      showToast(`Gagal menambah produk: ${err}`);
+    }
+  }
+
+  async function handleCreateSupplier(input: CreateSupplierInput) {
+    try {
+      await api.createSupplier(input);
+      suppliers = await api.getSuppliers();
+      isAddSupplierModalOpen = false;
+      showToast(`Pemasok ${input.name} berhasil disimpan!`);
+    } catch (err) {
+      showToast(`Gagal menambah supplier: ${err}`);
+    }
+  }
+
+  async function handleCreatePurchase(input: CreatePurchaseInput) {
+    try {
+      const poNum = await api.createPurchase(input);
+      purchases = await api.getPurchases();
+      isCreatePOModalOpen = false;
+      showToast(`Purchase Order ${poNum} berhasil diterbitkan!`);
+    } catch (err) {
+      showToast(`Gagal membuat PO: ${err}`);
+    }
+  }
+
+  async function handleReceivePurchase(purchaseId: string) {
+    try {
+      await api.receivePurchase(purchaseId);
+      purchases = await api.getPurchases();
+      products = await api.getProducts();
+      dashboardStats = await api.getDashboardStats();
+      showToast("Barang PO berhasil diterima! Stok gudang otomatis bertambah.");
+    } catch (err) {
+      showToast(`Gagal menerima PO: ${err}`);
+    }
+  }
+
+  async function handlePayPurchaseDebt(purchaseId: string, amount: number) {
+    try {
+      await api.payPurchaseDebt(purchaseId, amount);
+      purchases = await api.getPurchases();
+      showToast(`Pembayaran hutang Rp ${amount.toLocaleString("id-ID")} berhasil dicatat!`);
+    } catch (err) {
+      showToast(`Gagal membayar hutang: ${err}`);
+    }
+  }
+
+  async function handleAdjustStock(input: StockAdjustmentInput) {
+    try {
+      await api.adjustStock(input);
+      products = await api.getProducts();
+      dashboardStats = await api.getDashboardStats();
+      isStockOpnameModalOpen = false;
+      showToast("Penyesuaian stok opname berhasil disimpan!");
+    } catch (err) {
+      showToast(`Gagal opname stok: ${err}`);
     }
   }
 
@@ -821,13 +909,24 @@
                 </h2>
                 <p class="text-xs text-slate-500">Konversi satuan (Dus, Pak, Pcs), batas stok menipis, dan aturan pajak BKP</p>
               </div>
-              <button
-                onclick={() => showToast("Fitur Tambah Produk Baru Siap Digunakan")}
-                class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs"
-              >
-                <PackagePlus class="w-4 h-4" />
-                <span>Tambah Produk Baru</span>
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  onclick={() => (isStockOpnameModalOpen = true)}
+                  class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold flex items-center gap-1.5 border border-slate-300"
+                >
+                  <Boxes class="w-4 h-4 text-slate-600" />
+                  <span>Stok Opname Fisik</span>
+                </button>
+                <button
+                  type="button"
+                  onclick={() => (isAddProductModalOpen = true)}
+                  class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs"
+                >
+                  <PackagePlus class="w-4 h-4" />
+                  <span>Tambah Produk & Multi-Satuan</span>
+                </button>
+              </div>
             </div>
 
             <div class="flex-1 bg-white border border-slate-200 rounded-lg overflow-auto shadow-xs">
@@ -879,35 +978,206 @@
         <!-- TAB 4: SUPPLIER & PENGADAAN (HULU) -->
         {:else if activeTab === "procurement"}
           <div class="p-4 flex-1 flex flex-col gap-3 overflow-hidden">
+            <!-- Header Toolbar & Subtabs -->
             <div class="bg-white border border-slate-200 rounded-lg p-3 flex justify-between items-center shadow-xs">
-              <div>
-                <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <ReceiptText class="w-4 h-4 text-emerald-600" />
-                  <span>Daftar Supplier & Pengadaan Barang (Hulu)</span>
-                </h2>
-                <p class="text-xs text-slate-500">Pencatatan Purchase Order, Good Receipt, dan Hutang Dagang</p>
+              <div class="flex items-center gap-4">
+                <div>
+                  <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <ReceiptText class="w-4 h-4 text-emerald-600" />
+                    <span>Manajemen Pengadaan & Supplier (Hulu)</span>
+                  </h2>
+                  <p class="text-[11px] text-slate-500">Purchase Order (PO), Penerimaan Barang, dan Hutang Dagang</p>
+                </div>
+
+                <!-- Subtab Pills -->
+                <div class="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onclick={() => (procurementSubTab = "po")}
+                    class="px-3 py-1 rounded-md transition-colors {procurementSubTab === 'po' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
+                  >
+                    Purchase Order ({purchases.length})
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => (procurementSubTab = "suppliers")}
+                    class="px-3 py-1 rounded-md transition-colors {procurementSubTab === 'suppliers' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
+                  >
+                    Daftar Supplier ({suppliers.length})
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => (procurementSubTab = "debt")}
+                    class="px-3 py-1 rounded-md transition-colors {procurementSubTab === 'debt' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
+                  >
+                    Hutang Usaha (AP)
+                  </button>
+                </div>
+              </div>
+
+              <!-- Tombol Aksi Sesuai Subtab -->
+              <div class="flex items-center gap-2">
+                {#if procurementSubTab === "po"}
+                  <button
+                    type="button"
+                    onclick={() => (isCreatePOModalOpen = true)}
+                    class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs"
+                  >
+                    <Plus class="w-4 h-4" />
+                    <span>Buat PO Baru</span>
+                  </button>
+                {:else if procurementSubTab === "suppliers"}
+                  <button
+                    type="button"
+                    onclick={() => (isAddSupplierModalOpen = true)}
+                    class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs"
+                  >
+                    <Plus class="w-4 h-4" />
+                    <span>Tambah Supplier</span>
+                  </button>
+                {/if}
               </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {#each suppliers as sup}
-                <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-xs space-y-2">
-                  <div class="flex justify-between items-start">
-                    <div>
-                      <h3 class="font-bold text-slate-900 text-sm">{sup.name}</h3>
-                      <p class="text-xs text-slate-500">{sup.company_name || "-"}</p>
+            <!-- Konten Subtab 1: Purchase Order (PO) -->
+            {#if procurementSubTab === "po"}
+              <div class="flex-1 bg-white border border-slate-200 rounded-lg overflow-auto shadow-xs">
+                <table class="w-full text-left text-xs border-collapse">
+                  <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-semibold sticky top-0">
+                    <tr>
+                      <th class="py-2.5 px-3">No. PO</th>
+                      <th class="py-2.5 px-3">Supplier</th>
+                      <th class="py-2.5 px-3">Tipe Bayar</th>
+                      <th class="py-2.5 px-3">Jatuh Tempo</th>
+                      <th class="py-2.5 px-3 text-right">Subtotal</th>
+                      <th class="py-2.5 px-3 text-right">Total Nilai</th>
+                      <th class="py-2.5 px-3 text-center">Status</th>
+                      <th class="py-2.5 px-3 text-center">Aksi Gudang</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 text-slate-800">
+                    {#if purchases.length === 0}
+                      <tr>
+                        <td colspan="8" class="text-center py-8 text-slate-400">Belum ada Purchase Order (PO). Klik "Buat PO Baru" untuk memesan barang.</td>
+                      </tr>
+                    {:else}
+                      {#each purchases as po}
+                        <tr class="hover:bg-slate-50 transition-colors">
+                          <td class="py-2.5 px-3 font-mono font-bold text-slate-900">{po.po_number}</td>
+                          <td class="py-2.5 px-3 font-semibold text-slate-800">{po.supplier_name}</td>
+                          <td class="py-2.5 px-3 capitalize">
+                            <span class="text-[10px] px-1.5 py-0.5 rounded font-bold {po.payment_type === 'cash' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}">
+                              {po.payment_type}
+                            </span>
+                          </td>
+                          <td class="py-2.5 px-3 font-mono text-slate-600">{po.due_date || "-"}</td>
+                          <td class="py-2.5 px-3 text-right font-mono">Rp {po.subtotal.toLocaleString("id-ID")}</td>
+                          <td class="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
+                            Rp {po.total_amount.toLocaleString("id-ID")}
+                          </td>
+                          <td class="py-2.5 px-3 text-center">
+                            {#if po.status === "received"}
+                              <span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                                Diterima & Masuk Stok
+                              </span>
+                            {:else}
+                              <span class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full">
+                                Dipesan (Menunggu Barang)
+                              </span>
+                            {/if}
+                          </td>
+                          <td class="py-2.5 px-3 text-center">
+                            {#if po.status === "ordered"}
+                              <button
+                                type="button"
+                                onclick={() => handleReceivePurchase(po.id)}
+                                class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[11px] shadow-xs active:scale-95 flex items-center gap-1 mx-auto"
+                              >
+                                <CheckCircle class="w-3.5 h-3.5" />
+                                <span>Terima Barang</span>
+                              </button>
+                            {:else}
+                              <span class="text-slate-400 text-[11px]">Selesai</span>
+                            {/if}
+                          </td>
+                        </tr>
+                      {/each}
+                    {/if}
+                  </tbody>
+                </table>
+              </div>
+
+            <!-- Konten Subtab 2: Daftar Supplier -->
+            {:else if procurementSubTab === "suppliers"}
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 overflow-y-auto">
+                {#each suppliers as sup}
+                  <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-xs space-y-2">
+                    <div class="flex justify-between items-start">
+                      <div>
+                        <h3 class="font-bold text-slate-900 text-sm">{sup.name}</h3>
+                        <p class="text-xs text-slate-500">{sup.company_name || "-"}</p>
+                      </div>
+                      <span class="text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 font-medium">
+                        Tempo: {sup.payment_terms_days} Hari
+                      </span>
                     </div>
-                    <span class="text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
-                      Tempo: {sup.payment_terms_days} Hari
-                    </span>
+                    <div class="text-xs text-slate-600 space-y-1 pt-2 border-t border-slate-100">
+                      <div>Telepon: <span class="font-mono text-slate-900">{sup.phone || "-"}</span></div>
+                      <div>NPWP: <span class="font-mono text-slate-700">{sup.npwp || "-"}</span></div>
+                      <div>Alamat: <span>{sup.address || "-"}</span></div>
+                    </div>
                   </div>
-                  <div class="text-xs text-slate-600 space-y-1 pt-2 border-t border-slate-100">
-                    <div>Telepon: <span class="font-mono text-slate-900">{sup.phone || "-"}</span></div>
-                    <div>Alamat: <span>{sup.address || "-"}</span></div>
-                  </div>
-                </div>
-              {/each}
-            </div>
+                {/each}
+              </div>
+
+            <!-- Konten Subtab 3: Hutang Usaha (Accounts Payable) -->
+            {:else if procurementSubTab === "debt"}
+              <div class="flex-1 bg-white border border-slate-200 rounded-lg overflow-auto shadow-xs">
+                <table class="w-full text-left text-xs border-collapse">
+                  <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-semibold sticky top-0">
+                    <tr>
+                      <th class="py-2.5 px-3">No. Faktur / PO</th>
+                      <th class="py-2.5 px-3">Pemasok</th>
+                      <th class="py-2.5 px-3">Jatuh Tempo</th>
+                      <th class="py-2.5 px-3 text-right">Total Tagihan</th>
+                      <th class="py-2.5 px-3 text-right">Sudah Dibayar</th>
+                      <th class="py-2.5 px-3 text-right">Sisa Hutang</th>
+                      <th class="py-2.5 px-3 text-center">Aksi Bayar</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 text-slate-800">
+                    {#if unpaidPurchases.length === 0}
+                      <tr>
+                        <td colspan="7" class="text-center py-8 text-slate-400">Tidak ada tagihan hutang supplier yang belum lunas. Semua lunas!</td>
+                      </tr>
+                    {:else}
+                      {#each unpaidPurchases as p}
+                        {@const sisa = p.total_amount - p.paid_amount}
+                        <tr class="hover:bg-slate-50">
+                          <td class="py-2.5 px-3 font-mono font-bold text-slate-900">{p.po_number}</td>
+                          <td class="py-2.5 px-3 font-semibold text-slate-800">{p.supplier_name}</td>
+                          <td class="py-2.5 px-3 font-mono text-amber-700 font-bold">{p.due_date || "-"}</td>
+                          <td class="py-2.5 px-3 text-right font-mono">Rp {p.total_amount.toLocaleString("id-ID")}</td>
+                          <td class="py-2.5 px-3 text-right font-mono text-emerald-700">Rp {p.paid_amount.toLocaleString("id-ID")}</td>
+                          <td class="py-2.5 px-3 text-right font-mono font-bold text-rose-600">
+                            Rp {sisa.toLocaleString("id-ID")}
+                          </td>
+                          <td class="py-2.5 px-3 text-center">
+                            <button
+                              type="button"
+                              onclick={() => handlePayPurchaseDebt(p.id, sisa)}
+                              class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[11px] shadow-xs active:scale-95"
+                            >
+                              Lunasi Hutang
+                            </button>
+                          </td>
+                        </tr>
+                      {/each}
+                    {/if}
+                  </tbody>
+                </table>
+              </div>
+            {/if}
           </div>
 
         <!-- TAB 5: PELANGGAN & PIUTANG -->
@@ -1242,5 +1512,37 @@
     onStartShift={handleStartShift}
     onCloseShift={handleCloseShift}
     onAddCashMovement={handleAddCashMovement}
+  />
+
+  <!-- MODAL TAMBAH PRODUK & MULTI-SATUAN (SPRINT 3) -->
+  <AddProductModal
+    isOpen={isAddProductModalOpen}
+    {categories}
+    onClose={() => (isAddProductModalOpen = false)}
+    onSubmit={handleCreateProductFull}
+  />
+
+  <!-- MODAL TERBITKAN PURCHASE ORDER (SPRINT 3) -->
+  <CreatePOModal
+    isOpen={isCreatePOModalOpen}
+    {suppliers}
+    {products}
+    onClose={() => (isCreatePOModalOpen = false)}
+    onSubmit={handleCreatePurchase}
+  />
+
+  <!-- MODAL TAMBAH SUPPLIER BARU (SPRINT 3) -->
+  <AddSupplierModal
+    isOpen={isAddSupplierModalOpen}
+    onClose={() => (isAddSupplierModalOpen = false)}
+    onSubmit={handleCreateSupplier}
+  />
+
+  <!-- MODAL STOK OPNAME FISIK (SPRINT 3) -->
+  <StockOpnameModal
+    isOpen={isStockOpnameModalOpen}
+    {products}
+    onClose={() => (isStockOpnameModalOpen = false)}
+    onSubmit={handleAdjustStock}
   />
 </div>

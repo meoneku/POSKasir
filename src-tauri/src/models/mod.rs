@@ -46,6 +46,31 @@ pub struct Product {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UnitInput {
+    pub unit_name: String,
+    pub multiplier: i64,
+    pub barcode: Option<String>,
+    pub retail_price: f64,
+    pub wholesale_price_1: Option<f64>,
+    pub wholesale_price_2: Option<f64>,
+    pub min_qty_wholesale_1: Option<i64>,
+    pub min_qty_wholesale_2: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateProductFullInput {
+    pub sku: String,
+    pub barcode: Option<String>,
+    pub name: String,
+    pub category_id: Option<String>,
+    pub min_stock_alert: Option<i64>,
+    pub is_taxable: Option<i64>,
+    pub base_unit_name: String,
+    pub initial_stock: Option<i64>,
+    pub units: Vec<UnitInput>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CreateProductInput {
     pub sku: String,
     pub barcode: Option<String>,
@@ -106,6 +131,16 @@ pub struct Customer {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Supplier {
     pub id: String,
+    pub name: String,
+    pub company_name: Option<String>,
+    pub npwp: Option<String>,
+    pub phone: Option<String>,
+    pub address: Option<String>,
+    pub payment_terms_days: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateSupplierInput {
     pub name: String,
     pub company_name: Option<String>,
     pub npwp: Option<String>,
@@ -189,6 +224,53 @@ pub struct TransactionHeader {
     pub grand_total: f64,
     pub payment_status: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PurchaseItemInput {
+    pub product_id: String,
+    pub unit_id: String,
+    pub multiplier: i64,
+    pub quantity: i64,
+    pub unit_cost: f64,
+    pub subtotal: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreatePurchaseInput {
+    pub supplier_id: String,
+    pub payment_type: String, // 'cash' or 'credit'
+    pub due_date: Option<String>,
+    pub subtotal: f64,
+    pub tax_id: Option<String>,
+    pub tax_amount: f64,
+    pub total_amount: f64,
+    pub paid_amount: f64,
+    pub items: Vec<PurchaseItemInput>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PurchaseHeader {
+    pub id: String,
+    pub po_number: String,
+    pub supplier_id: String,
+    pub supplier_name: String,
+    pub status: String,
+    pub payment_type: String,
+    pub due_date: Option<String>,
+    pub subtotal: f64,
+    pub tax_amount: f64,
+    pub total_amount: f64,
+    pub paid_amount: f64,
+    pub items_count: i64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StockAdjustmentInput {
+    pub product_id: String,
+    pub actual_stock: i64,
+    pub reason: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

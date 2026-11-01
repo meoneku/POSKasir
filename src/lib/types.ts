@@ -39,6 +39,29 @@ export interface Product {
   units: ProductUnit[];
 }
 
+export interface UnitInput {
+  unit_name: string;
+  multiplier: number;
+  barcode?: string;
+  retail_price: number;
+  wholesale_price_1?: number;
+  wholesale_price_2?: number;
+  min_qty_wholesale_1?: number;
+  min_qty_wholesale_2?: number;
+}
+
+export interface CreateProductFullInput {
+  sku: string;
+  barcode?: string;
+  name: string;
+  category_id?: string;
+  min_stock_alert?: number;
+  is_taxable?: number;
+  base_unit_name: string;
+  initial_stock?: number;
+  units: UnitInput[];
+}
+
 export interface Tax {
   id: string;
   name: string;
@@ -78,6 +101,58 @@ export interface Supplier {
   phone: string | null;
   address: string | null;
   payment_terms_days: number;
+}
+
+export interface CreateSupplierInput {
+  name: string;
+  company_name?: string;
+  npwp?: string;
+  phone?: string;
+  address?: string;
+  payment_terms_days: number;
+}
+
+export interface PurchaseItemInput {
+  product_id: string;
+  unit_id: string;
+  multiplier: number;
+  quantity: number;
+  unit_cost: number;
+  subtotal: number;
+}
+
+export interface CreatePurchaseInput {
+  supplier_id: string;
+  payment_type: "cash" | "credit";
+  due_date?: string;
+  subtotal: number;
+  tax_id?: string;
+  tax_amount: number;
+  total_amount: number;
+  paid_amount: number;
+  items: PurchaseItemInput[];
+}
+
+export interface PurchaseHeader {
+  id: string;
+  po_number: string;
+  supplier_id: string;
+  supplier_name: string;
+  status: "draft" | "ordered" | "received" | "cancelled";
+  payment_type: "cash" | "credit";
+  due_date: string | null;
+  subtotal: number;
+  tax_amount: number;
+  total_amount: number;
+  paid_amount: number;
+  items_count: number;
+  created_at: string;
+}
+
+export interface StockAdjustmentInput {
+  product_id: string;
+  actual_stock: number;
+  reason: string;
 }
 
 export interface Shift {

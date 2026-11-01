@@ -648,3 +648,323 @@ pub fn get_dashboard_stats(db: State<'_, Database>) -> Result<DashboardStats, St
         low_stock_count: low_stock,
     })
 }
+
+#[tauri::command]
+pub fn create_supplier(
+    db: State<'_, Database>,
+    input: CreateSupplierInput,
+) -> Result<String, String> {
+    let conn = db.conn.lock();
+    let id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO suppliers (id, name, company_name, npwp, phone, address, payment_terms_days)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            id,
+            input.name,
+            input.company_name,
+            input.npwp,
+            input.phone,
+            input.address,
+            input.payment_terms_days
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn get_purchases(db: State<'_, Database>) -> Result<Vec<PurchaseHeader>, String> {
+    let conn = db.conn.lock();
+    let mut stmt = conn
+        .prepare(
+            "SELECT p.id, p.po_number, p.supplier_id, s.name as supplier_name, p.status,
+                    p.payment_type, p.due_date, p.subtotal, p.tax_amount, p.total_amount,
+                    p.paid_amount, (SELECT COUNT(pi.id) FROM purchase_items pi WHERE pi.purchase_id = p.id),
+                    p.created_at
+             FROM purchases p
+             JOIN suppliers s ON p.supplier_id = s.id
+             ORDER BY p.created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(PurchaseHeader {
+                id: r.get(0)?,
+                po_number: r.get(1)?,
+                supplier_id: r.get(2)?,
+                supplier_name: r.get(3)?,
+                status: r.get(4)?,
+                payment_type: r.get(5)?,
+                due_date: r.get(6)?,
+                subtotal: r.get(7)?,
+                tax_amount: r.get(8)?,
+                total_amount: r.get(9)?,
+                paid_amount: r.get(10)?,
+                items_count: r.get(11)?,
+                created_at: r.get(12)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for r in rows {
+        result.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn create_purchase(
+    db: State<'_, Database>,
+    input: CreatePurchaseInput,
+) -> Result<String, String> {
+    let mut conn = db.conn.lock();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let id = Uuid::new_v4().to_string();
+    let date_str = Local::now().format("%Y%m%d").to_string();
+    let rand_seq = Local::now().format("%H%M%S").to_string();
+    let po_num = format!("PO/{}/{}", date_str, rand_seq);
+
+    let status = "ordered";
+    let paid_amount = if input.payment_type == "cash" {
+        input.total_amount
+    } else {
+        input.paid_amount
+    };
+
+    tx.execute(
+        "INSERT INTO purchases (id, po_number, supplier_id, status, payment_type, due_date, subtotal, tax_id, tax_amount, total_amount, paid_amount)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            id,
+            po_num,
+            input.supplier_id,
+            status,
+            input.payment_type,
+            input.due_date,
+            input.subtotal,
+            input.tax_id,
+            input.tax_amount,
+            input.total_amount,
+            paid_amount
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    for item in input.items {
+        let item_id = Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO purchase_items (id, purchase_id, product_id, unit_id, multiplier, quantity, unit_cost, subtotal)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                item_id,
+                id,
+                item.product_id,
+                item.unit_id,
+                item.multiplier,
+                item.quantity,
+                item.unit_cost,
+                item.subtotal
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(po_num)
+}
+
+#[tauri::command]
+pub fn receive_purchase(db: State<'_, Database>, purchase_id: String) -> Result<(), String> {
+    let mut conn = db.conn.lock();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    // Ambil nomor PO dan periksa status
+    let (po_number, current_status): (String, String) = tx
+        .query_row(
+            "SELECT po_number, status FROM purchases WHERE id = ?1",
+            [&purchase_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if current_status == "received" {
+        return Err("Barang untuk PO ini sudah diterima sebelumnya.".to_string());
+    }
+
+    // Ambil item pembelian
+    let mut stmt = tx
+        .prepare("SELECT product_id, multiplier, quantity FROM purchase_items WHERE purchase_id = ?1")
+        .map_err(|e| e.to_string())?;
+
+    let items: Vec<(String, i64, i64)> = stmt
+        .query_map([&purchase_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(|res| res.ok())
+        .collect();
+    drop(stmt);
+
+    // Tambah stok ke master produk dan catat mutasi stok
+    for (product_id, multiplier, quantity) in items {
+        let total_base_qty = quantity * multiplier;
+
+        tx.execute(
+            "UPDATE products SET current_stock = current_stock + ?1 WHERE id = ?2",
+            params![total_base_qty, product_id],
+        )
+        .map_err(|e| e.to_string())?;
+
+        let mut_id = Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO stock_mutations (id, product_id, mutation_type, reference_no, qty_in, ending_stock, note)
+             SELECT ?1, ?2, 'purchase', ?3, ?4, current_stock, 'Penerimaan Barang Supplier'
+             FROM products WHERE id = ?2",
+            params![mut_id, product_id, po_number, total_base_qty],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // Update status PO menjadi 'received'
+    tx.execute(
+        "UPDATE purchases SET status = 'received' WHERE id = ?1",
+        [&purchase_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn pay_purchase_debt(
+    db: State<'_, Database>,
+    purchase_id: String,
+    amount: f64,
+) -> Result<(), String> {
+    let conn = db.conn.lock();
+    conn.execute(
+        "UPDATE purchases SET paid_amount = paid_amount + ?1 WHERE id = ?2",
+        params![amount, purchase_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn create_product_full(
+    db: State<'_, Database>,
+    input: CreateProductFullInput,
+) -> Result<String, String> {
+    let mut conn = db.conn.lock();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let product_id = Uuid::new_v4().to_string();
+    let initial_stock = input.initial_stock.unwrap_or(0);
+    let min_stock = input.min_stock_alert.unwrap_or(5);
+    let is_tax = input.is_taxable.unwrap_or(1);
+
+    tx.execute(
+        "INSERT INTO products (id, sku, barcode, name, category_id, min_stock_alert, is_taxable, base_unit_name, current_stock)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            product_id,
+            input.sku,
+            input.barcode,
+            input.name,
+            input.category_id,
+            min_stock,
+            is_tax,
+            input.base_unit_name,
+            initial_stock,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    for u in input.units {
+        let unit_id = Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO product_units (id, product_id, unit_name, multiplier, barcode, retail_price, wholesale_price_1, wholesale_price_2, min_qty_wholesale_1, min_qty_wholesale_2)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                unit_id,
+                product_id,
+                u.unit_name,
+                u.multiplier,
+                u.barcode,
+                u.retail_price,
+                u.wholesale_price_1,
+                u.wholesale_price_2,
+                u.min_qty_wholesale_1,
+                u.min_qty_wholesale_2,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    if initial_stock > 0 {
+        let mutation_id = Uuid::new_v4().to_string();
+        tx.execute(
+            "INSERT INTO stock_mutations (id, product_id, mutation_type, reference_no, qty_in, ending_stock, note)
+             VALUES (?1, ?2, 'opname_adj', 'INIT_STOCK', ?3, ?4, 'Stok Awal Produk Baru')",
+            params![mutation_id, product_id, initial_stock, initial_stock],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(product_id)
+}
+
+#[tauri::command]
+pub fn adjust_stock(db: State<'_, Database>, input: StockAdjustmentInput) -> Result<(), String> {
+    let mut conn = db.conn.lock();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let current_stock: i64 = tx
+        .query_row(
+            "SELECT current_stock FROM products WHERE id = ?1",
+            [&input.product_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let diff = input.actual_stock - current_stock;
+    let qty_in = if diff > 0 { diff } else { 0 };
+    let qty_out = if diff < 0 { -diff } else { 0 };
+
+    tx.execute(
+        "UPDATE products SET current_stock = ?1 WHERE id = ?2",
+        params![input.actual_stock, input.product_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut_id = Uuid::new_v4().to_string();
+    tx.execute(
+        "INSERT INTO stock_mutations (id, product_id, mutation_type, reference_no, qty_in, qty_out, ending_stock, note)
+         VALUES (?1, ?2, 'opname_adj', 'STK_OPNAME', ?3, ?4, ?5, ?6)",
+        params![mut_id, input.product_id, qty_in, qty_out, input.actual_stock, input.reason],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn create_category(
+    db: State<'_, Database>,
+    name: String,
+    description: Option<String>,
+) -> Result<String, String> {
+    let conn = db.conn.lock();
+    let id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO categories (id, name, description) VALUES (?1, ?2, ?3)",
+        params![id, name, description],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(id)
+}

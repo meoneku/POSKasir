@@ -13,6 +13,11 @@ import type {
   DashboardStats,
   ServerInfo,
   WsEvent,
+  CreateSupplierInput,
+  CreatePurchaseInput,
+  PurchaseHeader,
+  CreateProductFullInput,
+  StockAdjustmentInput,
 } from "./types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -279,6 +284,64 @@ export const api = {
   async stopServer(): Promise<void> {
     if (!isTauri) return;
     return invoke("stop_server");
+  },
+
+  async createSupplier(input: CreateSupplierInput): Promise<string> {
+    if (!isTauri) return "sup-mock";
+    return invoke("create_supplier", { input });
+  },
+
+  async getPurchases(): Promise<PurchaseHeader[]> {
+    if (!isTauri) {
+      return [
+        {
+          id: "po1",
+          po_number: "PO/20261101/001",
+          supplier_id: "sup1",
+          supplier_name: "PT. Pangan Nusantara",
+          status: "ordered",
+          payment_type: "credit",
+          due_date: "2026-11-15",
+          subtotal: 3500000,
+          tax_amount: 385000,
+          total_amount: 3885000,
+          paid_amount: 0,
+          items_count: 3,
+          created_at: new Date().toISOString(),
+        },
+      ];
+    }
+    return invoke("get_purchases");
+  },
+
+  async createPurchase(input: CreatePurchaseInput): Promise<string> {
+    if (!isTauri) return "PO/MOCK/001";
+    return invoke("create_purchase", { input });
+  },
+
+  async receivePurchase(purchaseId: string): Promise<void> {
+    if (!isTauri) return;
+    return invoke("receive_purchase", { purchaseId });
+  },
+
+  async payPurchaseDebt(purchaseId: string, amount: number): Promise<void> {
+    if (!isTauri) return;
+    return invoke("pay_purchase_debt", { purchaseId, amount });
+  },
+
+  async createProductFull(input: CreateProductFullInput): Promise<string> {
+    if (!isTauri) return "prod-mock";
+    return invoke("create_product_full", { input });
+  },
+
+  async adjustStock(input: StockAdjustmentInput): Promise<void> {
+    if (!isTauri) return;
+    return invoke("adjust_stock", { input });
+  },
+
+  async createCategory(name: string, description?: string): Promise<string> {
+    if (!isTauri) return "cat-mock";
+    return invoke("create_category", { name, description });
   },
 
   initWebSocket(hostIp: string, port: number, onMessage: (event: WsEvent) => void): () => void {
