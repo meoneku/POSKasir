@@ -1,8 +1,10 @@
 pub mod commands;
 pub mod db;
 pub mod models;
+pub mod server;
 
 use db::Database;
+use server::ServerManager;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -19,7 +21,20 @@ pub fn run() {
 
             // Inisialisasi Database SQLite WAL Mode
             let db = Database::init(db_path).expect("Gagal menginisialisasi SQLite database");
+            
+            // Inisialisasi Embedded Server Kasir Lokal
+            let server_manager = ServerManager::new(db.clone());
+            let server_for_bg = server_manager.clone();
+
+            // Auto-start server di background (port 8080)
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = server_for_bg.start(Some(8080)).await {
+                    eprintln!("Info: Gagal auto-start server lokal: {}", e);
+                }
+            });
+
             app.manage(db);
+            app.manage(server_manager);
 
             Ok(())
         })
@@ -40,6 +55,9 @@ pub fn run() {
             commands::get_customers,
             commands::get_suppliers,
             commands::get_dashboard_stats,
+            commands::get_server_status,
+            commands::start_server,
+            commands::stop_server,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

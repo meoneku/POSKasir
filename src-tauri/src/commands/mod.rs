@@ -1,9 +1,28 @@
 use crate::db::Database;
 use crate::models::*;
+use crate::server::{ServerInfo, ServerManager};
 use chrono::Local;
 use rusqlite::params;
 use tauri::State;
 use uuid::Uuid;
+
+#[tauri::command]
+pub fn get_server_status(server: State<'_, ServerManager>) -> Result<ServerInfo, String> {
+    Ok(server.get_info())
+}
+
+#[tauri::command]
+pub async fn start_server(
+    server: State<'_, ServerManager>,
+    port: Option<u16>,
+) -> Result<ServerInfo, String> {
+    server.start(port).await
+}
+
+#[tauri::command]
+pub async fn stop_server(server: State<'_, ServerManager>) -> Result<(), String> {
+    server.stop().await
+}
 
 #[tauri::command]
 pub fn get_store_settings(db: State<'_, Database>) -> Result<Vec<AppSetting>, String> {

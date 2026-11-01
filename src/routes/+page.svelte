@@ -19,6 +19,7 @@
     ReceiptText,
     Percent,
     AlertTriangle,
+    Wifi,
   } from "@lucide/svelte";
 
   import Header from "$lib/components/Header.svelte";
@@ -41,6 +42,7 @@
     CartItem,
     TransactionHeader,
     DashboardStats,
+    ServerInfo,
   } from "$lib/types";
 
   // --- REAKTIF STATE (SVELTE 5 RUNES) ---
@@ -59,6 +61,10 @@
   let suppliers = $state<Supplier[]>([]);
   let recentTransactions = $state<TransactionHeader[]>([]);
   let dashboardStats = $state<DashboardStats | null>(null);
+  let serverInfo = $state<ServerInfo | null>(null);
+  let serverPortInput = $state(8080);
+  let networkRole = $state<"standalone" | "server" | "client">("server");
+  let clientRemoteHost = $state("192.168.1.100:8080");
 
   // State Kasir Retail & Keranjang
   let searchQuery = $state("");
@@ -162,7 +168,7 @@
   async function loadAllData() {
     isLoading = true;
     try {
-      const [s, c, p, t, pm, sh, cust, sup, r, ds] = await Promise.all([
+      const [s, c, p, t, pm, sh, cust, sup, r, ds, srv] = await Promise.all([
         api.getStoreSettings(),
         api.getCategories(),
         api.getProducts(),
@@ -173,6 +179,7 @@
         api.getSuppliers(),
         api.getRecentTransactions(),
         api.getDashboardStats(),
+        api.getServerStatus(),
       ]);
       settings = s;
       categories = c;
@@ -184,6 +191,10 @@
       suppliers = sup;
       recentTransactions = r;
       dashboardStats = ds;
+      serverInfo = srv;
+      if (srv) {
+        serverPortInput = srv.port;
+      }
     } catch (err) {
       console.error("Gagal memuat data:", err);
       showToast("Gagal memuat basis data!");
@@ -192,6 +203,54 @@
       setTimeout(() => {
         isLoading = false;
       }, 150);
+    }
+  }
+
+  // WebSocket Listener untuk Sinkronisasi Realtime LAN
+  $effect(() => {
+    if (serverInfo?.is_running && serverInfo.host_ip) {
+      const cleanup = api.initWebSocket(serverInfo.host_ip, serverInfo.port, (event) => {
+        if (event.event_type === "STOCK_UPDATED") {
+          const updates = event.payload?.stock_updates || [];
+          for (const u of updates) {
+            const prod = products.find((p) => p.id === u.product_id);
+            if (prod) {
+              prod.current_stock = u.new_stock;
+            }
+          }
+          showToast(`Stok terupdate via sinkronisasi LAN (#${event.payload?.invoice_number || ""})`);
+        }
+      });
+      return cleanup;
+    }
+  });
+
+  async function handleToggleServer() {
+    try {
+      if (serverInfo?.is_running) {
+        await api.stopServer();
+        serverInfo = await api.getServerStatus();
+        showToast("Embedded Server Kasir Lokal dihentikan.");
+      } else {
+        serverInfo = await api.startServer(serverPortInput);
+        showToast(`Server Lokal aktif di ${serverInfo.host_ip}:${serverInfo.port}`);
+      }
+    } catch (err) {
+      showToast(`Gagal mengatur server: ${err}`);
+    }
+  }
+
+  async function handleTestPing() {
+    try {
+      const srv = await api.getServerStatus();
+      serverInfo = srv;
+      if (srv.is_running) {
+        showToast(`Server Aktif! IP: ${srv.host_ip}:${srv.port} (${srv.connected_clients} klien)`);
+      } else {
+        showToast("Server saat ini berstatus Non-aktif.");
+      }
+    } catch (err) {
+      showToast("Gagal menghubungi server lokal.");
     }
   }
 
@@ -412,6 +471,7 @@
     {storeName}
     branchName={storeBranch}
     shift={currentShift}
+    {serverInfo}
     onOpenShiftModal={() => (isShiftModalOpen = true)}
   />
 
@@ -1040,17 +1100,118 @@
                 </div>
               </div>
 
-              <!-- Konfigurasi Mode Jaringan Server Lokal -->
-              <div class="pt-3 border-t border-slate-200">
-                <h3 class="text-xs font-bold text-slate-900 mb-2">Model Jaringan Komputer Kasir</h3>
-                <div class="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2 text-xs">
-                  <div class="flex items-center gap-2 text-emerald-800 font-semibold">
-                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                    <span>Mode: Server Kasir Utama (Embedded Host Port 8080)</span>
+              <!-- Konfigurasi Mode Jaringan Server Lokal (Sprint 2) -->
+              <div class="pt-3 border-t border-slate-200 space-y-3">
+                <div class="flex justify-between items-center">
+                  <h3 class="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <Wifi class="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Embedded Server Kasir Lokal (LAN Host)</span>
+                  </h3>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onclick={handleTestPing}
+                      class="px-2.5 py-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded border border-slate-300"
+                    >
+                      Tes Ping
+                    </button>
+                    <button
+                      type="button"
+                      onclick={handleToggleServer}
+                      class="px-3 py-1 text-xs font-bold rounded text-white {serverInfo?.is_running ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'}"
+                    >
+                      {serverInfo?.is_running ? 'Hentikan Server' : 'Aktifkan Server'}
+                    </button>
                   </div>
-                  <p class="text-slate-500 text-[11px] leading-relaxed">
-                    Komputer ini bertindak sebagai Server Kasir Utama bagi komputer kasir klien lain di jaringan Wi-Fi/LAN lokal. Data tersimpan di SQLite lokal dengan WAL mode aktif.
-                  </p>
+                </div>
+
+                <!-- Status Server Realtime Card -->
+                <div class="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2.5 text-xs">
+                  <div class="flex justify-between items-center">
+                    <div class="flex items-center gap-2">
+                      <span class="w-2.5 h-2.5 rounded-full {serverInfo?.is_running ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}"></span>
+                      <span class="font-bold text-slate-900">
+                        {serverInfo?.is_running ? 'Server Aktif (Siap Menerima Klien LAN)' : 'Server Non-aktif'}
+                      </span>
+                    </div>
+                    <span class="font-mono text-xs bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-700">
+                      Port: {serverInfo?.port || serverPortInput}
+                    </span>
+                  </div>
+
+                  {#if serverInfo?.is_running}
+                    <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 text-[11px]">
+                      <div>
+                        <span class="text-slate-500">Alamat IP Host Lokal:</span>
+                        <div class="font-mono font-bold text-emerald-700 text-xs mt-0.5">
+                          http://{serverInfo.host_ip}:{serverInfo.port}
+                        </div>
+                      </div>
+                      <div>
+                        <span class="text-slate-500">Kasir Klien Terhubung:</span>
+                        <div class="font-bold text-slate-900 text-xs mt-0.5">
+                          {serverInfo.connected_clients} Komputer Klien (WebSocket Aktif)
+                        </div>
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+
+                <!-- Pilihan Mode Peran Komputer -->
+                <div class="space-y-2 text-xs">
+                  <div class="font-semibold text-slate-700">Peran Komputer Ini:</div>
+                  <div class="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onclick={() => (networkRole = "server")}
+                      class="p-2.5 rounded-lg border text-left transition-colors {networkRole === 'server' ? 'border-emerald-600 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-600' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}"
+                    >
+                      <div class="font-bold">Kasir Utama (Host)</div>
+                      <div class="text-[10px] text-slate-500 mt-0.5">Menyimpan SQLite master & melayani klien</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onclick={() => (networkRole = "client")}
+                      class="p-2.5 rounded-lg border text-left transition-colors {networkRole === 'client' ? 'border-emerald-600 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-600' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}"
+                    >
+                      <div class="font-bold">Kasir Klien (Worker)</div>
+                      <div class="text-[10px] text-slate-500 mt-0.5">Terhubung ke IP Kasir Utama via Wi-Fi/LAN</div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onclick={() => (networkRole = "standalone")}
+                      class="p-2.5 rounded-lg border text-left transition-colors {networkRole === 'standalone' ? 'border-emerald-600 bg-emerald-50 text-emerald-950 ring-1 ring-emerald-600' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}"
+                    >
+                      <div class="font-bold">Mandiri (Standalone)</div>
+                      <div class="text-[10px] text-slate-500 mt-0.5">Berjalan sendiri tanpa jaringan LAN</div>
+                    </button>
+                  </div>
+
+                  {#if networkRole === "client"}
+                    <div class="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+                      <label for="remote-host-ip" class="block text-xs font-semibold text-blue-900">
+                        Alamat IP & Port Kasir Utama:
+                      </label>
+                      <div class="flex gap-2">
+                        <input
+                          id="remote-host-ip"
+                          type="text"
+                          bind:value={clientRemoteHost}
+                          placeholder="misal: 192.168.1.100:8080"
+                          class="flex-1 px-3 py-1.5 bg-white border border-blue-300 rounded font-mono text-xs text-slate-900"
+                        />
+                        <button
+                          type="button"
+                          onclick={() => showToast(`Mencoba menyambungkan ke ${clientRemoteHost}...`)}
+                          class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded text-xs"
+                        >
+                          Hubungkan
+                        </button>
+                      </div>
+                    </div>
+                  {/if}
                 </div>
               </div>
             </div>

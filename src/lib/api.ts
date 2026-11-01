@@ -11,6 +11,8 @@ import type {
   CreateTransactionPayload,
   TransactionHeader,
   DashboardStats,
+  ServerInfo,
+  WsEvent,
 } from "./types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -246,5 +248,86 @@ export const api = {
       };
     }
     return invoke("get_dashboard_stats");
+  },
+
+  async getServerStatus(): Promise<ServerInfo> {
+    if (!isTauri) {
+      return {
+        is_running: true,
+        host_ip: "192.168.1.100",
+        port: 8080,
+        connected_clients: 2,
+        store_name: "BERKAH POS KASIR",
+      };
+    }
+    return invoke("get_server_status");
+  },
+
+  async startServer(port?: number): Promise<ServerInfo> {
+    if (!isTauri) {
+      return {
+        is_running: true,
+        host_ip: "192.168.1.100",
+        port: port || 8080,
+        connected_clients: 0,
+        store_name: "BERKAH POS KASIR",
+      };
+    }
+    return invoke("start_server", { port });
+  },
+
+  async stopServer(): Promise<void> {
+    if (!isTauri) return;
+    return invoke("stop_server");
+  },
+
+  initWebSocket(hostIp: string, port: number, onMessage: (event: WsEvent) => void): () => void {
+    const wsUrl = `ws://${hostIp || "127.0.0.1"}:${port || 8080}/ws`;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: any = null;
+    let isClosedExplicitly = false;
+
+    const connect = () => {
+      try {
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          console.log("[WebSocket] Terhubung ke Server Kasir Lokal:", wsUrl);
+        };
+
+        ws.onmessage = (e) => {
+          try {
+            const data: WsEvent = JSON.parse(e.data);
+            onMessage(data);
+          } catch (err) {
+            console.error("[WebSocket] Gagal parse pesan:", err);
+          }
+        };
+
+        ws.onclose = () => {
+          if (!isClosedExplicitly) {
+            // Coba sambung ulang setiap 3 detik
+            reconnectTimer = setTimeout(connect, 3000);
+          }
+        };
+
+        ws.onerror = (err) => {
+          console.warn("[WebSocket] Koneksi gagal/terputus.");
+          ws?.close();
+        };
+      } catch (e) {
+        if (!isClosedExplicitly) {
+          reconnectTimer = setTimeout(connect, 3000);
+        }
+      }
+    };
+
+    connect();
+
+    return () => {
+      isClosedExplicitly = true;
+      clearTimeout(reconnectTimer);
+      ws?.close();
+    };
   },
 };

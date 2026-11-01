@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { Store, User, Clock, ShieldCheck, Wifi } from "@lucide/svelte";
-  import type { Shift, AppSetting } from "$lib/types";
+  import { Store, User, Clock, ShieldCheck, Wifi, Radio } from "@lucide/svelte";
+  import type { Shift, ServerInfo } from "$lib/types";
 
   interface Props {
     storeName?: string;
     branchName?: string;
     shift: Shift | null;
+    serverInfo?: ServerInfo | null;
     onOpenShiftModal: () => void;
   }
 
@@ -13,6 +14,7 @@
     storeName = "BERKAH POS KASIR",
     branchName = "Kantor Pusat",
     shift = null,
+    serverInfo = null,
     onOpenShiftModal,
   }: Props = $props();
 
@@ -46,9 +48,23 @@
           {branchName}
         </span>
       </div>
-      <div class="flex items-center gap-1.5 text-[11px] text-slate-500">
-        <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-        <span>Server Lokal Aktif (WAL Mode)</span>
+      <div class="flex items-center gap-2 text-[11px] text-slate-500">
+        {#if serverInfo?.is_running}
+          <div class="flex items-center gap-1.5 font-mono">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
+            <span class="text-emerald-700 font-semibold">{serverInfo.host_ip}:{serverInfo.port}</span>
+          </div>
+          {#if serverInfo.connected_clients > 0}
+            <span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded border border-emerald-300">
+              {serverInfo.connected_clients} Klien
+            </span>
+          {/if}
+        {:else}
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-slate-400 inline-block"></span>
+            <span>Server Lokal Non-aktif</span>
+          </div>
+        {/if}
       </div>
     </div>
   </div>

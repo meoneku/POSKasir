@@ -83,7 +83,7 @@ Setiap AI Agent yang membuat atau memodifikasi kode **WAJIB MEMATUHI ATURAN INI*
 
 - [x] **Perencanaan Sistem Lengkap & Dokumentasi** (Tersedia di `docs/`)
 - [x] **Sprint 1**: Inisialisasi Project (Tauri v2 + Svelte 5 + Tailwind + SQLite WAL Runner)
-- [ ] **Sprint 2**: Embedded Server Kasir Lokal (Axum + mDNS + WebSocket Sync)
+- [x] **Sprint 2**: Embedded Server Kasir Lokal (Axum + mDNS + WebSocket Sync)
 - [ ] **Sprint 3**: Modul Hulu (Pemasok, PO, Penerimaan Barang, Multi-Satuan & Harga)
 - [ ] **Sprint 4**: Modul Hilir Retail (Kasir Cepat, Barcode, Struk Thermal, Cash Drawer, Shift)
 - [ ] **Sprint 5**: Modul Hilir Grosir (Pelanggan B2B, Piutang Tempo, Surat Jalan, Faktur Pajak)

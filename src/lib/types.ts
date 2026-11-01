@@ -153,3 +153,17 @@ export interface DashboardStats {
   total_products_count: number;
   low_stock_count: number;
 }
+
+export interface ServerInfo {
+  is_running: boolean;
+  host_ip: string;
+  port: number;
+  connected_clients: number;
+  store_name: string;
+}
+
+export interface WsEvent {
+  event_type: "STOCK_UPDATED" | "TRANSACTION_CREATED" | "CONNECTED" | "PING";
+  payload?: any;
+  timestamp: string;
+}
