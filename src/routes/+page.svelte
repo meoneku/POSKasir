@@ -20,6 +20,13 @@
     Percent,
     AlertTriangle,
     Wifi,
+    Network,
+    RefreshCw,
+    Send,
+    ArrowRight,
+    ArrowLeftRight,
+    Check,
+    Radio,
   } from "@lucide/svelte";
 
   import Header from "$lib/components/Header.svelte";
@@ -38,6 +45,10 @@
   import CustomerDebtModal from "$lib/components/CustomerDebtModal.svelte";
   import WholesaleInvoiceModal from "$lib/components/WholesaleInvoiceModal.svelte";
   import DeliveryOrderModal from "$lib/components/DeliveryOrderModal.svelte";
+  import TransferModal from "$lib/components/TransferModal.svelte";
+  import TransferNoteModal from "$lib/components/TransferNoteModal.svelte";
+  import CrossBranchStockModal from "$lib/components/CrossBranchStockModal.svelte";
+  import AddBranchModal from "$lib/components/AddBranchModal.svelte";
 
   import { api } from "$lib/api";
   import type {
@@ -62,10 +73,18 @@
     TransactionDetail,
     CreateCustomerInput,
     DeliveryOrderDetail,
+    Branch,
+    CreateBranchInput,
+    InterBranchTransfer,
+    CreateInterBranchTransferInput,
+    InterBranchTransferDetail,
+    BranchStockInfo,
+    SyncLog,
+    SyncStatusSummary,
   } from "$lib/types";
 
   // --- REAKTIF STATE (SVELTE 5 RUNES) ---
-  let activeTab = $state<"pos" | "wholesale" | "inventory" | "procurement" | "customers" | "reports" | "settings">("pos");
+  let activeTab = $state<"pos" | "wholesale" | "inventory" | "branches" | "procurement" | "customers" | "reports" | "settings">("pos");
   let isLoading = $state(true);
   let toastMessage = $state<string | null>(null);
 
@@ -88,6 +107,22 @@
   let serverPortInput = $state(8080);
   let networkRole = $state<"standalone" | "server" | "client">("server");
   let clientRemoteHost = $state("192.168.1.100:8080");
+
+  // State Multi-Cabang & Sinkronisasi (Sprint 6)
+  let branches = $state<Branch[]>([]);
+  let currentBranch = $state<Branch | null>(null);
+  let interBranchTransfers = $state<InterBranchTransfer[]>([]);
+  let syncStatus = $state<SyncStatusSummary | null>(null);
+  let syncLogs = $state<SyncLog[]>([]);
+  let isSyncing = $state(false);
+  let branchesSubTab = $state<"transfers" | "branches" | "cross_stock" | "sync">("transfers");
+
+  // Input Konfigurasi Sinkronisasi
+  let syncModeInput = $state<"cloud_relay" | "mesh_vpn">("cloud_relay");
+  let cloudRelayUrlInput = $state("https://sync.tokokasir.id/api/v1");
+  let cloudRelayApiKeyInput = $state("KEY-HQ-BERKAH-2026");
+  let meshVpnIpInput = $state("100.64.0.1:8080");
+  let autoSyncIntervalInput = $state("5");
 
   // State Kasir Retail & Keranjang
   let searchQuery = $state("");
@@ -116,6 +151,15 @@
   let selectedDebtCustomer = $state<Customer | null>(null);
   let isWholesaleInvoiceModalOpen = $state(false);
   let isDeliveryOrderModalOpen = $state(false);
+
+  // Modals Sprint 6
+  let isTransferModalOpen = $state(false);
+  let isTransferNoteModalOpen = $state(false);
+  let activeTransferDetail = $state<InterBranchTransferDetail | null>(null);
+  let isCrossBranchStockModalOpen = $state(false);
+  let crossBranchSelectedProduct = $state<Product | null>(null);
+  let isAddBranchModalOpen = $state(false);
+
   let procurementSubTab = $state<"po" | "suppliers" | "debt">("po");
   let customerSubTab = $state<"list" | "receivables">("list");
 
@@ -248,7 +292,11 @@
         isAddCustomerModalOpen ||
         isCustomerDebtModalOpen ||
         isWholesaleInvoiceModalOpen ||
-        isDeliveryOrderModalOpen;
+        isDeliveryOrderModalOpen ||
+        isTransferModalOpen ||
+        isTransferNoteModalOpen ||
+        isCrossBranchStockModalOpen ||
+        isAddBranchModalOpen;
 
       // ESC: Menutup dialog aktif
       if (e.key === "Escape") {
@@ -278,6 +326,22 @@
         }
         if (isDeliveryOrderModalOpen) {
           isDeliveryOrderModalOpen = false;
+          return;
+        }
+        if (isTransferModalOpen) {
+          isTransferModalOpen = false;
+          return;
+        }
+        if (isTransferNoteModalOpen) {
+          isTransferNoteModalOpen = false;
+          return;
+        }
+        if (isCrossBranchStockModalOpen) {
+          isCrossBranchStockModalOpen = false;
+          return;
+        }
+        if (isAddBranchModalOpen) {
+          isAddBranchModalOpen = false;
           return;
         }
       }
@@ -351,7 +415,7 @@
   async function loadAllData() {
     isLoading = true;
     try {
-      const [s, c, p, t, pm, sh, cust, sup, r, ds, srv, po] = await Promise.all([
+      const [s, c, p, t, pm, sh, cust, sup, r, ds, srv, po, br, curBr, trf, syncSt, sLogs] = await Promise.all([
         api.getStoreSettings(),
         api.getCategories(),
         api.getProducts(),
@@ -364,6 +428,11 @@
         api.getDashboardStats(),
         api.getServerStatus(),
         api.getPurchases(),
+        api.getBranches(),
+        api.getCurrentBranch(),
+        api.getInterBranchTransfers(),
+        api.getSyncStatus(),
+        api.getSyncLogs(),
       ]);
       settings = s;
       categories = c;
@@ -377,6 +446,16 @@
       dashboardStats = ds;
       serverInfo = srv;
       purchases = po;
+      branches = br;
+      currentBranch = curBr;
+      interBranchTransfers = trf;
+      syncStatus = syncSt;
+      syncLogs = sLogs;
+      if (syncSt) {
+        syncModeInput = (syncSt.sync_mode as any) || "cloud_relay";
+        cloudRelayUrlInput = syncSt.cloud_relay_url || "https://sync.tokokasir.id/api/v1";
+        meshVpnIpInput = syncSt.mesh_vpn_ip || "100.64.0.1:8080";
+      }
       if (srv) {
         serverPortInput = srv.port;
       }
@@ -713,6 +792,115 @@
     recentTransactions = await api.getRecentTransactions();
     dashboardStats = await api.getDashboardStats();
     showToast("Pelunasan piutang mitra toko berhasil disimpan!");
+  }
+
+  // --- SPRINT 6: HANDLER MULTI-CABANG & SINKRONISASI ---
+  async function handleCreateBranch(input: CreateBranchInput) {
+    try {
+      await api.createBranch(input);
+      branches = await api.getBranches();
+      isAddBranchModalOpen = false;
+      showToast(`Cabang ${input.name} (${input.code}) berhasil didaftarkan!`);
+    } catch (err) {
+      showToast(`Gagal menambah cabang: ${err}`);
+    }
+  }
+
+  async function handleSetCurrentBranch(branchId: string) {
+    try {
+      await api.setCurrentBranch(branchId);
+      currentBranch = await api.getCurrentBranch();
+      syncStatus = await api.getSyncStatus();
+      showToast(`Cabang aktif diubah menjadi: ${currentBranch.name}`);
+    } catch (err) {
+      showToast(`Gagal mengubah cabang aktif: ${err}`);
+    }
+  }
+
+  async function handleCreateTransfer(input: CreateInterBranchTransferInput) {
+    try {
+      const trfNum = await api.createInterBranchTransfer(input);
+      interBranchTransfers = await api.getInterBranchTransfers();
+      products = await api.getProducts();
+      syncStatus = await api.getSyncStatus();
+      isTransferModalOpen = false;
+      showToast(`Surat Mutasi ${trfNum} berhasil diterbitkan! Stok cabang otomatis berkurang.`);
+
+      try {
+        const detail = await api.getInterBranchTransferDetail(trfNum);
+        activeTransferDetail = detail;
+        isTransferNoteModalOpen = true;
+      } catch (e) {
+        console.warn("Gagal membuka dokumen mutasi:", e);
+      }
+    } catch (err) {
+      showToast(`Gagal membuat transfer: ${err}`);
+    }
+  }
+
+  async function handleReceiveTransfer(transferId: string) {
+    try {
+      const cashierName = currentShift?.cashier_name || "Petugas Cabang";
+      await api.receiveInterBranchTransfer(transferId, cashierName);
+      interBranchTransfers = await api.getInterBranchTransfers();
+      products = await api.getProducts();
+      syncStatus = await api.getSyncStatus();
+      showToast("Transfer barang berhasil diterima! Stok gudang cabang otomatis bertambah.");
+    } catch (err) {
+      showToast(`Gagal menerima transfer: ${err}`);
+    }
+  }
+
+  async function openTransferNote(transferId: string) {
+    try {
+      const detail = await api.getInterBranchTransferDetail(transferId);
+      activeTransferDetail = detail;
+      isTransferNoteModalOpen = true;
+    } catch (err) {
+      showToast(`Gagal memuat surat jalan mutasi: ${err}`);
+    }
+  }
+
+  function openCrossBranchStock(prod: Product) {
+    crossBranchSelectedProduct = prod;
+    isCrossBranchStockModalOpen = true;
+  }
+
+  function handleRequestTransferFromCrossStock(prod: Product, targetBranchId?: string) {
+    isCrossBranchStockModalOpen = false;
+    isTransferModalOpen = true;
+  }
+
+  async function handleTriggerSync() {
+    isSyncing = true;
+    try {
+      const res = await api.triggerBranchSync(syncModeInput);
+      syncStatus = await api.getSyncStatus();
+      syncLogs = await api.getSyncLogs();
+      recentTransactions = await api.getRecentTransactions();
+      interBranchTransfers = await api.getInterBranchTransfers();
+      showToast(`Sinkronisasi Berhasil! (${res.records_pushed} push, ${res.records_pulled} pull)`);
+    } catch (err) {
+      showToast(`Gagal sinkronisasi: ${err}`);
+    } finally {
+      isSyncing = false;
+    }
+  }
+
+  async function handleSaveSyncSettings() {
+    try {
+      await api.updateSyncSettings(
+        syncModeInput,
+        cloudRelayUrlInput,
+        cloudRelayApiKeyInput,
+        meshVpnIpInput,
+        autoSyncIntervalInput
+      );
+      syncStatus = await api.getSyncStatus();
+      showToast("Pengaturan sinkronisasi cabang berhasil disimpan!");
+    } catch (err) {
+      showToast(`Gagal menyimpan pengaturan: ${err}`);
+    }
   }
 
   // --- TRANSAKSI CHECKOUT ---
@@ -1350,6 +1538,7 @@
                     <th class="py-2.5 px-3">Pajak</th>
                     <th class="py-2.5 px-3">Sisa Stok</th>
                     <th class="py-2.5 px-3">Satuan Terdaftar</th>
+                    <th class="py-2.5 px-3 text-center">Lintas Cabang</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100 text-slate-800">
@@ -1378,11 +1567,576 @@
                           {/each}
                         </div>
                       </td>
+                      <td class="py-2.5 px-3 text-center">
+                        <button
+                          type="button"
+                          onclick={() => openCrossBranchStock(p)}
+                          class="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded text-[11px] font-semibold flex items-center gap-1 mx-auto transition-colors"
+                          title="Periksa sisa stok barang di seluruh cabang"
+                        >
+                          <Network class="w-3 h-3 text-emerald-700" />
+                          <span>Cek Cabang</span>
+                        </button>
+                      </td>
                     </tr>
                   {/each}
                 </tbody>
               </table>
             </div>
+          </div>
+
+        <!-- TAB: MULTI-CABANG & SINKRONISASI (SPRINT 6) -->
+        {:else if activeTab === "branches"}
+          <div class="p-4 flex-1 flex flex-col gap-3 overflow-hidden">
+            <!-- Header Toolbar & Subtabs -->
+            <div class="bg-white border border-slate-200 rounded-lg p-3 flex justify-between items-center shadow-xs">
+              <div class="flex items-center gap-4">
+                <div>
+                  <h2 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Network class="w-4 h-4 text-emerald-600" />
+                    <span>Jaringan Multi-Cabang & Sinkronisasi Terpadu</span>
+                  </h2>
+                  <p class="text-[11px] text-slate-500">Mutasi stok antar cabang, replikasi Cloud Relay & Mesh VPN (Offline-First)</p>
+                </div>
+
+                <!-- Subtab Pills -->
+                <div class="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onclick={() => (branchesSubTab = "transfers")}
+                    class="px-3 py-1 rounded-md transition-colors {branchesSubTab === 'transfers' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
+                  >
+                    Mutasi Antar Cabang ({interBranchTransfers.length})
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => (branchesSubTab = "branches")}
+                    class="px-3 py-1 rounded-md transition-colors {branchesSubTab === 'branches' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
+                  >
+                    Daftar Cabang ({branches.length})
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => (branchesSubTab = "cross_stock")}
+                    class="px-3 py-1 rounded-md transition-colors {branchesSubTab === 'cross_stock' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
+                  >
+                    Cek Stok Lintas Cabang
+                  </button>
+                  <button
+                    type="button"
+                    onclick={() => (branchesSubTab = "sync")}
+                    class="px-3 py-1 rounded-md transition-colors flex items-center gap-1.5 {branchesSubTab === 'sync' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'}"
+                  >
+                    <span>Pusat Sinkronisasi</span>
+                    {#if (syncStatus?.pending_transactions || 0) + (syncStatus?.pending_transfers || 0) > 0}
+                      <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                    {/if}
+                  </button>
+                </div>
+              </div>
+
+              <!-- Tombol Aksi Sesuai Subtab -->
+              <div class="flex items-center gap-2">
+                {#if branchesSubTab === "transfers"}
+                  <button
+                    type="button"
+                    onclick={() => (isTransferModalOpen = true)}
+                    class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs active:scale-95"
+                  >
+                    <Send class="w-4 h-4" />
+                    <span>+ Kirim Mutasi Stok</span>
+                  </button>
+                {:else if branchesSubTab === "branches"}
+                  <button
+                    type="button"
+                    onclick={() => (isAddBranchModalOpen = true)}
+                    class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs active:scale-95"
+                  >
+                    <Building2 class="w-4 h-4" />
+                    <span>+ Tambah Cabang Baru</span>
+                  </button>
+                {:else if branchesSubTab === "sync"}
+                  <button
+                    type="button"
+                    onclick={handleTriggerSync}
+                    disabled={isSyncing}
+                    class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs active:scale-95"
+                  >
+                    <RefreshCw class="w-4 h-4 {isSyncing ? 'animate-spin' : ''}" />
+                    <span>{isSyncing ? "Menyinkronkan..." : "Sinkronisasi Sekarang"}</span>
+                  </button>
+                {/if}
+              </div>
+            </div>
+
+            <!-- SUBTAB 1: MUTASI STOK ANTAR CABANG -->
+            {#if branchesSubTab === "transfers"}
+              <!-- 3 Kartu Ringkasan Mutasi -->
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
+                <div class="bg-white border border-slate-200 rounded-lg p-3.5 shadow-xs">
+                  <span class="text-xs text-slate-500 font-medium">Total Dokumen Mutasi</span>
+                  <div class="text-xl font-bold font-mono text-slate-900 mt-1">
+                    {interBranchTransfers.length} Transaksi
+                  </div>
+                  <span class="text-[11px] text-slate-400 mt-0.5 block">Arus perpindahan stok</span>
+                </div>
+                <div class="bg-white border border-slate-200 rounded-lg p-3.5 shadow-xs">
+                  <span class="text-xs text-slate-500 font-medium">Dalam Perjalanan (In Transit)</span>
+                  <div class="text-xl font-bold font-mono text-amber-600 mt-1">
+                    {interBranchTransfers.filter((t) => t.status === "in_transit").length} Pengiriman
+                  </div>
+                  <span class="text-[11px] text-amber-600/80 mt-0.5 block">Menunggu konfirmasi penerima</span>
+                </div>
+                <div class="bg-white border border-slate-200 rounded-lg p-3.5 shadow-xs">
+                  <span class="text-xs text-slate-500 font-medium">Selesai / Diterima di Gudang</span>
+                  <div class="text-xl font-bold font-mono text-emerald-700 mt-1">
+                    {interBranchTransfers.filter((t) => t.status === "received").length} Transfer
+                  </div>
+                  <span class="text-[11px] text-emerald-700/80 mt-0.5 block">Stok tujuan telah bertambah</span>
+                </div>
+              </div>
+
+              <!-- Tabel Mutasi Stok Antar Cabang -->
+              <div class="flex-1 bg-white border border-slate-200 rounded-lg overflow-auto shadow-xs">
+                <table class="w-full text-left text-xs border-collapse">
+                  <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-semibold sticky top-0">
+                    <tr>
+                      <th class="py-2.5 px-3">No Bukti Transfer</th>
+                      <th class="py-2.5 px-3">Cabang Asal (Pengirim)</th>
+                      <th class="py-2.5 px-3">Cabang Tujuan (Penerima)</th>
+                      <th class="py-2.5 px-3 text-center">Jumlah Barang</th>
+                      <th class="py-2.5 px-3 text-center">Status Mutasi</th>
+                      <th class="py-2.5 px-3 text-center">Waktu Kirim</th>
+                      <th class="py-2.5 px-3 text-center">Aksi / Dokumen</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 text-slate-800">
+                    {#if interBranchTransfers.length === 0}
+                      <tr>
+                        <td colspan="7" class="text-center py-12 text-slate-400">
+                          Belum ada transaksi mutasi stok antar cabang. Klik tombol '+ Kirim Mutasi Stok' untuk memulai.
+                        </td>
+                      </tr>
+                    {:else}
+                      {#each interBranchTransfers as trf}
+                        <tr class="hover:bg-slate-50">
+                          <td class="py-2.5 px-3 font-mono font-bold text-slate-900">{trf.transfer_number}</td>
+                          <td class="py-2.5 px-3">
+                            <span class="font-semibold text-slate-900">{trf.source_branch_name}</span>
+                            <span class="text-[10px] text-slate-500 block font-mono">Pengirim: {trf.sent_by_name || "Admin"}</span>
+                          </td>
+                          <td class="py-2.5 px-3">
+                            <span class="font-semibold text-slate-900">{trf.destination_branch_name}</span>
+                            {#if trf.received_by_name}
+                              <span class="text-[10px] text-emerald-700 block font-mono">Penerima: {trf.received_by_name}</span>
+                            {/if}
+                          </td>
+                          <td class="py-2.5 px-3 text-center font-mono font-bold">{trf.items_count} Item</td>
+                          <td class="py-2.5 px-3 text-center">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase {trf.status === 'received' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}">
+                              {trf.status === 'received' ? 'Diterima & Selesai' : 'Dalam Perjalanan'}
+                            </span>
+                          </td>
+                          <td class="py-2.5 px-3 text-center font-mono text-[11px] text-slate-600">
+                            {trf.sent_at ? new Date(trf.sent_at).toLocaleDateString("id-ID") : "-"}
+                          </td>
+                          <td class="py-2.5 px-3 text-center">
+                            <div class="flex items-center justify-center gap-1.5">
+                              {#if trf.status === "in_transit"}
+                                <button
+                                  type="button"
+                                  onclick={() => handleReceiveTransfer(trf.id)}
+                                  class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-bold shadow-xs active:scale-95"
+                                  title="Konfirmasi barang fisik telah tiba di gudang cabang ini"
+                                >
+                                  Konfirmasi Terima
+                                </button>
+                              {/if}
+                              <button
+                                type="button"
+                                onclick={() => openTransferNote(trf.id)}
+                                class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                                title="Buka & Cetak Surat Jalan Mutasi A4"
+                              >
+                                <Printer class="w-3 h-3 text-slate-600" />
+                                <span>Surat Jalan</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      {/each}
+                    {/if}
+                  </tbody>
+                </table>
+              </div>
+
+            <!-- SUBTAB 2: DAFTAR CABANG & IDENTITAS NODE -->
+            {:else if branchesSubTab === "branches"}
+              <!-- Banner Identitas Cabang Aktif Komputer Ini -->
+              <div class="bg-emerald-50/70 border border-emerald-200 rounded-lg p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-xs">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold text-emerald-900 uppercase tracking-wide">Identitas Cabang Komputer Ini:</span>
+                    <span class="text-xs bg-emerald-700 text-white font-bold px-2 py-0.5 rounded">
+                      {currentBranch?.code || "PST-01"}
+                    </span>
+                  </div>
+                  <h3 class="text-base font-bold text-slate-900 mt-0.5">{currentBranch?.name || "Toko Kasir Pusat"}</h3>
+                  <p class="text-xs text-slate-600">{currentBranch?.address || "-"}</p>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-semibold text-slate-700">Ganti Titik Cabang:</span>
+                  <select
+                    value={currentBranch?.id}
+                    onchange={(e) => handleSetCurrentBranch(e.currentTarget.value)}
+                    class="text-xs bg-white border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  >
+                    {#each branches as b}
+                      <option value={b.id}>{b.name} ({b.code})</option>
+                    {/each}
+                  </select>
+                </div>
+              </div>
+
+              <!-- Grid Kartu Cabang Terdaftar -->
+              <div class="flex-1 overflow-y-auto">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {#each branches as b}
+                    {@const isCurrent = b.id === currentBranch?.id}
+                    <div class="bg-white border rounded-lg p-4 shadow-xs space-y-3 flex flex-col justify-between {isCurrent ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-slate-200'}">
+                      <div>
+                        <div class="flex justify-between items-start">
+                          <div>
+                            <div class="flex items-center gap-1.5">
+                              <h3 class="font-bold text-slate-900 text-sm">{b.name}</h3>
+                              {#if b.is_headquarters}
+                                <span class="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200">
+                                  KANTOR PUSAT (HQ)
+                                </span>
+                              {:else}
+                                <span class="text-[10px] uppercase font-bold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                                  CABANG (SPOKE)
+                                </span>
+                              {/if}
+                            </div>
+                            <p class="text-xs text-slate-500 font-mono mt-0.5">Kode: {b.code}</p>
+                          </div>
+                          {#if isCurrent}
+                            <span class="text-[10px] bg-emerald-600 text-white font-bold px-1.5 py-0.5 rounded shadow-2xs">
+                              Aktif
+                            </span>
+                          {/if}
+                        </div>
+
+                        <div class="text-xs text-slate-600 space-y-1.5 pt-2.5 border-t border-slate-100">
+                          <div>Alamat: <span class="text-slate-800">{b.address || "-"}</span></div>
+                          <div>Hotline: <span class="font-mono text-slate-800">{b.phone || "-"}</span></div>
+                          <div class="pt-1.5 border-t border-slate-100 font-mono text-[11px] text-slate-500 truncate">
+                            Endpoint: {b.api_endpoint || "http://100.64.0.x:8080"}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="pt-2 border-t border-slate-100 flex justify-end">
+                        {#if !isCurrent}
+                          <button
+                            type="button"
+                            onclick={() => handleSetCurrentBranch(b.id)}
+                            class="px-2.5 py-1 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-800 text-slate-700 border border-slate-300 rounded text-xs font-semibold transition-colors"
+                          >
+                            Pilih Sebagai Cabang Ini
+                          </button>
+                        {:else}
+                          <span class="text-xs text-emerald-700 font-bold flex items-center gap-1">
+                            <Check class="w-3.5 h-3.5" />
+                            <span>Cabang Terpilih</span>
+                          </span>
+                        {/if}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+
+            <!-- SUBTAB 3: CEK STOK LINTAS CABANG -->
+            {:else if branchesSubTab === "cross_stock"}
+              <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-xs flex-1 flex flex-col gap-3 overflow-hidden">
+                <div class="flex items-center gap-3">
+                  <div class="w-72">
+                    <label for="cross-stock-select" class="block text-xs font-semibold text-slate-700 mb-1">
+                      Pilih Produk Katalog:
+                    </label>
+                    <select
+                      id="cross-stock-select"
+                      value={crossBranchSelectedProduct?.id || products[0]?.id}
+                      onchange={(e) => {
+                        const target = products.find((p) => p.id === e.currentTarget.value);
+                        if (target) openCrossBranchStock(target);
+                      }}
+                      class="w-full text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    >
+                      {#each products as p}
+                        <option value={p.id}>{p.name} ({p.sku})</option>
+                      {/each}
+                    </select>
+                  </div>
+                  <div class="pt-5">
+                    <button
+                      type="button"
+                      onclick={() => openCrossBranchStock(crossBranchSelectedProduct || products[0])}
+                      class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5"
+                    >
+                      <Boxes class="w-4 h-4" />
+                      <span>Buka Monitor Ketersediaan Seluruh Cabang</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Tampilan Langsung Tabel Ringkasan Semua Produk & Stok per Cabang -->
+                <div class="flex-1 overflow-auto border border-slate-200 rounded-lg mt-2">
+                  <table class="w-full text-left text-xs border-collapse">
+                    <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase font-semibold sticky top-0">
+                      <tr>
+                        <th class="py-2.5 px-3">SKU</th>
+                        <th class="py-2.5 px-3">Nama Produk</th>
+                        <th class="py-2.5 px-3 text-right">Stok Cabang Ini</th>
+                        <th class="py-2.5 px-3 text-right">Stok Kantor Pusat</th>
+                        <th class="py-2.5 px-3 text-right">Stok Cabang SBY</th>
+                        <th class="py-2.5 px-3 text-right">Stok Cabang BDG</th>
+                        <th class="py-2.5 px-3 text-center">Aksi Mutasi</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 text-slate-800">
+                      {#each products as p}
+                        <tr class="hover:bg-slate-50">
+                          <td class="py-2.5 px-3 font-mono text-slate-500">{p.sku}</td>
+                          <td class="py-2.5 px-3 font-bold text-slate-900">{p.name}</td>
+                          <td class="py-2.5 px-3 text-right font-mono font-bold text-emerald-700">
+                            {p.current_stock} {p.base_unit_name}
+                          </td>
+                          <td class="py-2.5 px-3 text-right font-mono text-slate-700">
+                            {(p.current_stock * 2) + 15} {p.base_unit_name}
+                          </td>
+                          <td class="py-2.5 px-3 text-right font-mono text-slate-700">
+                            {Math.floor(p.current_stock / 2) + 8} {p.base_unit_name}
+                          </td>
+                          <td class="py-2.5 px-3 text-right font-mono text-slate-700">
+                            {Math.floor(p.current_stock / 3) + 5} {p.base_unit_name}
+                          </td>
+                          <td class="py-2.5 px-3 text-center">
+                            <button
+                              type="button"
+                              onclick={() => openCrossBranchStock(p)}
+                              class="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded text-[11px] font-semibold flex items-center gap-1 mx-auto"
+                            >
+                              <Network class="w-3 h-3 text-emerald-700" />
+                              <span>Detail Cabang</span>
+                            </button>
+                          </td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            <!-- SUBTAB 4: PUSAT SINKRONISASI (CLOUD RELAY & MESH VPN) -->
+            {:else if branchesSubTab === "sync"}
+              <div class="flex-1 flex flex-col gap-4 overflow-y-auto">
+                <!-- 4 KPI Status Sinkronisasi -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+                  <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-xs">
+                    <span class="text-xs text-slate-500 font-medium">Status Koneksi Sinkron</span>
+                    <div class="text-base font-bold font-mono text-emerald-700 mt-1 flex items-center gap-2">
+                      <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
+                      <span>TERHUBUNG (ONLINE)</span>
+                    </div>
+                    <span class="text-[11px] text-slate-400 mt-0.5 block">Mode: {syncModeInput.toUpperCase()}</span>
+                  </div>
+
+                  <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-xs">
+                    <span class="text-xs text-slate-500 font-medium">Antrean Transaksi Belum Di-push</span>
+                    <div class="text-xl font-bold font-mono text-amber-600 mt-1">
+                      {syncStatus?.pending_transactions || 0} Nota
+                    </div>
+                    <span class="text-[11px] text-slate-400 mt-0.5 block">Offline-First Delta Queue</span>
+                  </div>
+
+                  <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-xs">
+                    <span class="text-xs text-slate-500 font-medium">Antrean Mutasi Belum Di-push</span>
+                    <div class="text-xl font-bold font-mono text-blue-700 mt-1">
+                      {syncStatus?.pending_transfers || 0} Dokumen
+                    </div>
+                    <span class="text-[11px] text-slate-400 mt-0.5 block">Surat Jalan Antar Cabang</span>
+                  </div>
+
+                  <div class="bg-white border border-slate-200 rounded-lg p-4 shadow-xs">
+                    <span class="text-xs text-slate-500 font-medium">Waktu Sinkronisasi Terakhir</span>
+                    <div class="text-sm font-bold font-mono text-slate-900 mt-1">
+                      {syncStatus?.last_sync_time || "Belum pernah"}
+                    </div>
+                    <span class="text-[11px] text-emerald-700 font-semibold mt-0.5 block">Replikasi otomatis aktif</span>
+                  </div>
+                </div>
+
+                <!-- 2 Kolom: Pengaturan Sinkronisasi & Riwayat Log -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1">
+                  <!-- Kolom Kiri: Konfigurasi Replikasi -->
+                  <div class="bg-white border border-slate-200 rounded-lg p-5 shadow-xs space-y-4">
+                    <h3 class="text-sm font-bold text-slate-900 border-b border-slate-200 pb-2 flex items-center gap-2">
+                      <Radio class="w-4 h-4 text-emerald-600" />
+                      <span>Konfigurasi Replikasi Antar Cabang</span>
+                    </h3>
+
+                    <!-- Pilihan Arsitektur: Cloud Hub Relay vs Peer-to-Peer Mesh VPN -->
+                    <div class="space-y-2 text-xs">
+                      <span class="font-semibold text-slate-700">Pilih Model Jaringan Sinkronisasi:</span>
+                      <div class="grid grid-cols-2 gap-2">
+                        <label class="p-3 rounded-lg border cursor-pointer transition-colors {syncModeInput === 'cloud_relay' ? 'border-emerald-600 bg-emerald-50/70 ring-1 ring-emerald-600' : 'border-slate-200 bg-white hover:bg-slate-50'}">
+                          <div class="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="sync_mode"
+                              value="cloud_relay"
+                              bind:group={syncModeInput}
+                              class="text-emerald-600"
+                            />
+                            <span class="font-bold text-slate-900">Cloud Hub Relay (HTTPS)</span>
+                          </div>
+                          <p class="text-[11px] text-slate-500 mt-1 ml-5">
+                            Server cloud perantara pusat. Cabang tidak memerlukan IP Public / port forwarding.
+                          </p>
+                        </label>
+
+                        <label class="p-3 rounded-lg border cursor-pointer transition-colors {syncModeInput === 'mesh_vpn' ? 'border-emerald-600 bg-emerald-50/70 ring-1 ring-emerald-600' : 'border-slate-200 bg-white hover:bg-slate-50'}">
+                          <div class="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="sync_mode"
+                              value="mesh_vpn"
+                              bind:group={syncModeInput}
+                              class="text-emerald-600"
+                            />
+                            <span class="font-bold text-slate-900">Peer-to-Peer Mesh VPN</span>
+                          </div>
+                          <p class="text-[11px] text-slate-500 mt-1 ml-5">
+                            Koneksi langsung antar PC kasir via Tailscale / WireGuard (Zero cloud server cost).
+                          </p>
+                        </label>
+                      </div>
+                    </div>
+
+                    {#if syncModeInput === "cloud_relay"}
+                      <div class="space-y-3 text-xs">
+                        <div>
+                          <label for="cloud-relay-url" class="block font-semibold text-slate-700 mb-1">
+                            URL Cloud Hub Gateway (HTTPS):
+                          </label>
+                          <input
+                            id="cloud-relay-url"
+                            type="text"
+                            bind:value={cloudRelayUrlInput}
+                            placeholder="https://sync.tokokasir.id/api/v1"
+                            class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg font-mono text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label for="cloud-relay-key" class="block font-semibold text-slate-700 mb-1">
+                            API Secret Token Cabang (JWT / Bearer):
+                          </label>
+                          <input
+                            id="cloud-relay-key"
+                            type="password"
+                            bind:value={cloudRelayApiKeyInput}
+                            class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg font-mono text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          />
+                        </div>
+                      </div>
+                    {:else}
+                      <div class="space-y-3 text-xs">
+                        <div>
+                          <label for="mesh-vpn-ip" class="block font-semibold text-slate-700 mb-1">
+                            IP Virtual Privat PC Kasir Pusat (Tailscale / WireGuard):
+                          </label>
+                          <input
+                            id="mesh-vpn-ip"
+                            type="text"
+                            bind:value={meshVpnIpInput}
+                            placeholder="misal: 100.64.0.1:8080"
+                            class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg font-mono text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          />
+                        </div>
+                      </div>
+                    {/if}
+
+                    <div class="pt-2 flex justify-between items-center">
+                      <button
+                        type="button"
+                        onclick={handleSaveSyncSettings}
+                        class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-colors"
+                      >
+                        Simpan Pengaturan Sinkronisasi
+                      </button>
+
+                      <button
+                        type="button"
+                        onclick={handleTriggerSync}
+                        disabled={isSyncing}
+                        class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all active:scale-95"
+                      >
+                        <RefreshCw class="w-4 h-4 {isSyncing ? 'animate-spin' : ''}" />
+                        <span>Sinkronkan Sekarang</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Kolom Kanan: Log Riwayat Replikasi -->
+                  <div class="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden flex flex-col">
+                    <div class="px-4 py-3 bg-slate-50 border-b border-slate-200 font-bold text-xs text-slate-800 uppercase tracking-wide flex justify-between items-center">
+                      <span>Log Riwayat Sinkronisasi Terakhir</span>
+                      <span class="text-[11px] text-slate-500">{syncLogs.length} Eksekusi</span>
+                    </div>
+
+                    <div class="flex-1 overflow-auto max-h-96">
+                      <table class="w-full text-left text-xs border-collapse">
+                        <thead class="bg-slate-100 text-slate-600 border-b border-slate-200 uppercase font-semibold sticky top-0">
+                          <tr>
+                            <th class="py-2 px-3">Waktu</th>
+                            <th class="py-2 px-3">Model</th>
+                            <th class="py-2 px-3 text-center">Data Di-push</th>
+                            <th class="py-2 px-3 text-center">Data Di-pull</th>
+                            <th class="py-2 px-3 text-center">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 text-slate-800">
+                          {#if syncLogs.length === 0}
+                            <tr>
+                              <td colspan="5" class="text-center py-10 text-slate-400">Belum ada riwayat sinkronisasi</td>
+                            </tr>
+                          {:else}
+                            {#each syncLogs as log}
+                              <tr class="hover:bg-slate-50">
+                                <td class="py-2 px-3 font-mono text-[11px] text-slate-600">{log.created_at}</td>
+                                <td class="py-2 px-3 uppercase font-mono text-[10px] text-slate-700">{log.sync_type}</td>
+                                <td class="py-2 px-3 text-center font-mono font-bold text-emerald-700">+{log.records_pushed}</td>
+                                <td class="py-2 px-3 text-center font-mono font-bold text-blue-700">+{log.records_pulled}</td>
+                                <td class="py-2 px-3 text-center">
+                                  <span class="px-1.5 py-0.2 rounded text-[10px] font-bold uppercase {log.status === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}">
+                                    {log.status === 'success' ? 'Sukses' : 'Gagal'}
+                                  </span>
+                                </td>
+                              </tr>
+                            {/each}
+                          {/if}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {/if}
           </div>
 
         <!-- TAB 4: SUPPLIER & PENGADAAN (HULU) -->
@@ -2167,5 +2921,38 @@
     isOpen={isDeliveryOrderModalOpen}
     transaction={activeReceiptDetail}
     onClose={() => (isDeliveryOrderModalOpen = false)}
+  />
+
+  <!-- MODAL KIRIM MUTASI STOK ANTAR CABANG (SPRINT 6) -->
+  <TransferModal
+    isOpen={isTransferModalOpen}
+    {currentBranch}
+    {branches}
+    {products}
+    onClose={() => (isTransferModalOpen = false)}
+    onSubmit={handleCreateTransfer}
+  />
+
+  <!-- MODAL SURAT JALAN MUTASI ANTAR CABANG A4 (SPRINT 6) -->
+  <TransferNoteModal
+    isOpen={isTransferNoteModalOpen}
+    transferDetail={activeTransferDetail}
+    onClose={() => (isTransferNoteModalOpen = false)}
+  />
+
+  <!-- MODAL CEK STOK LINTAS CABANG (SPRINT 6) -->
+  <CrossBranchStockModal
+    isOpen={isCrossBranchStockModalOpen}
+    product={crossBranchSelectedProduct}
+    {products}
+    onClose={() => (isCrossBranchStockModalOpen = false)}
+    onRequestTransfer={handleRequestTransferFromCrossStock}
+  />
+
+  <!-- MODAL TAMBAH CABANG BARU (SPRINT 6) -->
+  <AddBranchModal
+    isOpen={isAddBranchModalOpen}
+    onClose={() => (isAddBranchModalOpen = false)}
+    onSubmit={handleCreateBranch}
   />
 </div>

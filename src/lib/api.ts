@@ -24,6 +24,14 @@ import type {
   CustomerDebtPayment,
   CreditCheckResult,
   DeliveryOrderDetail,
+  Branch,
+  CreateBranchInput,
+  InterBranchTransfer,
+  CreateInterBranchTransferInput,
+  InterBranchTransferDetail,
+  BranchStockInfo,
+  SyncLog,
+  SyncStatusSummary,
 } from "./types";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -526,6 +534,150 @@ export const api = {
       driverName,
       vehicleNumber,
       notes,
+    });
+  },
+
+  // --- SPRINT 6: MULTI-CABANG & SINKRONISASI ---
+
+  async getBranches(): Promise<Branch[]> {
+    if (!isTauri) {
+      return [
+        { id: "b1", code: "PST-01", name: "Toko Kasir Pusat (Jakarta)", address: "Jl. Perdagangan Niaga No. 88, Jakarta", phone: "021-5551234", is_headquarters: 1, created_at: new Date().toISOString() },
+        { id: "b2", code: "SBY-02", name: "Cabang Surabaya Gubeng", address: "Jl. Pemuda No. 45, Surabaya", phone: "031-7778899", is_headquarters: 0, created_at: new Date().toISOString() },
+        { id: "b3", code: "BDG-03", name: "Cabang Bandung Dago", address: "Jl. Ir. H. Juanda No. 112, Bandung", phone: "022-8889900", is_headquarters: 0, created_at: new Date().toISOString() },
+      ];
+    }
+    return invoke("get_branches");
+  },
+
+  async createBranch(input: CreateBranchInput): Promise<string> {
+    if (!isTauri) return "branch-new-id";
+    return invoke("create_branch", { input });
+  },
+
+  async getCurrentBranch(): Promise<Branch> {
+    if (!isTauri) {
+      return { id: "b1", code: "PST-01", name: "Toko Kasir Pusat (Jakarta)", address: "Jl. Perdagangan Niaga No. 88, Jakarta", phone: "021-5551234", is_headquarters: 1, created_at: new Date().toISOString() };
+    }
+    return invoke("get_current_branch");
+  },
+
+  async setCurrentBranch(branchId: string): Promise<void> {
+    if (!isTauri) return;
+    return invoke("set_current_branch", { branchId });
+  },
+
+  async getInterBranchTransfers(): Promise<InterBranchTransfer[]> {
+    if (!isTauri) return [];
+    return invoke("get_inter_branch_transfers");
+  },
+
+  async getInterBranchTransferDetail(transferId: string): Promise<InterBranchTransferDetail> {
+    if (!isTauri) {
+      return {
+        transfer: {
+          id: transferId,
+          transfer_number: "TRF/PST-SBY/202611/0001",
+          source_branch_id: "b1",
+          source_branch_name: "Toko Kasir Pusat (Jakarta)",
+          destination_branch_id: "b2",
+          destination_branch_name: "Cabang Surabaya Gubeng",
+          status: "in_transit",
+          sent_by: "u1",
+          sent_by_name: "Admin Pusat",
+          received_by: undefined,
+          received_by_name: undefined,
+          sent_at: new Date().toISOString(),
+          received_at: undefined,
+          sync_status: "synced",
+          notes: "Kiriman stok tambahan minyak dan beras",
+          items_count: 2,
+          created_at: new Date().toISOString(),
+        },
+        items: [
+          { id: "tfi1", transfer_id: transferId, product_id: "p1", product_name: "Minyak Goreng 2L", sku: "MINYAK-01", unit_id: "u1", unit_name: "Dus (6 Pouch)", quantity: 10, base_qty: 60 },
+          { id: "tfi2", transfer_id: transferId, product_id: "p2", product_name: "Beras Pandan Wangi 5kg", sku: "BERAS-01", unit_id: "u2", unit_name: "Sak", quantity: 20, base_qty: 20 },
+        ],
+        source_branch: { id: "b1", code: "PST-01", name: "Toko Kasir Pusat (Jakarta)", address: "Jl. Perdagangan Niaga No. 88, Jakarta", phone: "021-5551234", is_headquarters: 1, created_at: new Date().toISOString() },
+        destination_branch: { id: "b2", code: "SBY-02", name: "Cabang Surabaya Gubeng", address: "Jl. Pemuda No. 45, Surabaya", phone: "031-7778899", is_headquarters: 0, created_at: new Date().toISOString() },
+      };
+    }
+    return invoke("get_inter_branch_transfer_detail", { transferId });
+  },
+
+  async createInterBranchTransfer(input: CreateInterBranchTransferInput): Promise<string> {
+    if (!isTauri) return "TRF/PST-SBY/202611/0001";
+    return invoke("create_inter_branch_transfer", { input });
+  },
+
+  async receiveInterBranchTransfer(transferId: string, receivedBy: string): Promise<void> {
+    if (!isTauri) return;
+    return invoke("receive_inter_branch_transfer", { transferId, receivedBy });
+  },
+
+  async getCrossBranchStock(productId: string): Promise<BranchStockInfo[]> {
+    if (!isTauri) {
+      return [
+        { branch_id: "b1", branch_code: "PST-01", branch_name: "Toko Kasir Pusat (Jakarta)", stock_qty: 48, base_unit_name: "Pcs", is_current_branch: true },
+        { branch_id: "b2", branch_code: "SBY-02", branch_name: "Cabang Surabaya Gubeng", stock_qty: 24, base_unit_name: "Pcs", is_current_branch: false },
+        { branch_id: "b3", branch_code: "BDG-03", branch_name: "Cabang Bandung Dago", stock_qty: 18, base_unit_name: "Pcs", is_current_branch: false },
+      ];
+    }
+    return invoke("get_cross_branch_stock", { productId });
+  },
+
+  async getSyncStatus(): Promise<SyncStatusSummary> {
+    if (!isTauri) {
+      return {
+        pending_transactions: 0,
+        pending_transfers: 0,
+        last_sync_time: "Baru saja",
+        last_sync_status: "synced",
+        current_branch_code: "PST-01",
+        current_branch_name: "Toko Kasir Pusat (Jakarta)",
+        is_headquarters: true,
+        sync_mode: "cloud_relay",
+        cloud_relay_url: "https://sync.tokokasir.id/api/v1",
+        mesh_vpn_ip: "100.64.0.1:8080",
+      };
+    }
+    return invoke("get_sync_status");
+  },
+
+  async triggerBranchSync(syncType?: string): Promise<SyncLog> {
+    if (!isTauri) {
+      return {
+        id: "sync-mock",
+        sync_direction: "two_way",
+        sync_type: syncType || "cloud_relay",
+        records_pushed: 5,
+        records_pulled: 6,
+        status: "success",
+        created_at: new Date().toISOString(),
+      };
+    }
+    return invoke("trigger_branch_sync", { syncType });
+  },
+
+  async getSyncLogs(): Promise<SyncLog[]> {
+    if (!isTauri) return [];
+    return invoke("get_sync_logs");
+  },
+
+  async updateSyncSettings(
+    syncMode: string,
+    cloudRelayUrl: string,
+    cloudRelayApiKey: string,
+    meshVpnIp: string,
+    autoSyncInterval: string
+  ): Promise<void> {
+    if (!isTauri) return;
+    return invoke("update_sync_settings", {
+      syncMode,
+      cloudRelayUrl,
+      cloudRelayApiKey,
+      meshVpnIp,
+      autoSyncInterval,
     });
   },
 

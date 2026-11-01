@@ -430,3 +430,128 @@ pub struct ShiftReport {
     pub report_text: String,
 }
 
+// ============================================================================
+// SPRINT 6: MULTI-CABANG & SINKRONISASI
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Branch {
+    pub id: String,
+    pub code: String,
+    pub name: String,
+    pub address: Option<String>,
+    pub phone: Option<String>,
+    pub is_headquarters: i64,
+    pub api_endpoint: Option<String>,
+    pub api_key: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateBranchInput {
+    pub code: String,
+    pub name: String,
+    pub address: Option<String>,
+    pub phone: Option<String>,
+    pub is_headquarters: i64,
+    pub api_endpoint: Option<String>,
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InterBranchTransfer {
+    pub id: String,
+    pub transfer_number: String,
+    pub source_branch_id: String,
+    pub source_branch_name: String,
+    pub destination_branch_id: String,
+    pub destination_branch_name: String,
+    pub status: String, // 'draft', 'in_transit', 'received', 'cancelled'
+    pub sent_by: Option<String>,
+    pub sent_by_name: Option<String>,
+    pub received_by: Option<String>,
+    pub received_by_name: Option<String>,
+    pub sent_at: Option<String>,
+    pub received_at: Option<String>,
+    pub sync_status: String,
+    pub notes: Option<String>,
+    pub items_count: i64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InterBranchTransferItem {
+    pub id: String,
+    pub transfer_id: String,
+    pub product_id: String,
+    pub product_name: String,
+    pub sku: String,
+    pub unit_id: String,
+    pub unit_name: String,
+    pub quantity: i64,
+    pub base_qty: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateTransferItemInput {
+    pub product_id: String,
+    pub unit_id: String,
+    pub quantity: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateInterBranchTransferInput {
+    pub destination_branch_id: String,
+    pub sent_by: Option<String>,
+    pub notes: Option<String>,
+    pub items: Vec<CreateTransferItemInput>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InterBranchTransferDetail {
+    pub transfer: InterBranchTransfer,
+    pub items: Vec<InterBranchTransferItem>,
+    pub source_branch: Branch,
+    pub destination_branch: Branch,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BranchStockInfo {
+    pub branch_id: String,
+    pub branch_code: String,
+    pub branch_name: String,
+    pub stock_qty: i64,
+    pub base_unit_name: String,
+    pub address: Option<String>,
+    pub phone: Option<String>,
+    pub is_current_branch: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SyncLog {
+    pub id: String,
+    pub branch_id: Option<String>,
+    pub branch_name: Option<String>,
+    pub sync_direction: String,
+    pub sync_type: String,
+    pub records_pushed: i64,
+    pub records_pulled: i64,
+    pub status: String,
+    pub error_message: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SyncStatusSummary {
+    pub pending_transactions: i64,
+    pub pending_transfers: i64,
+    pub last_sync_time: String,
+    pub last_sync_status: String,
+    pub current_branch_code: String,
+    pub current_branch_name: String,
+    pub is_headquarters: bool,
+    pub sync_mode: String,
+    pub cloud_relay_url: String,
+    pub mesh_vpn_ip: String,
+}
+

@@ -258,14 +258,29 @@ CREATE TABLE IF NOT EXISTS inter_branch_transfer_items (
     quantity INTEGER NOT NULL,
     base_qty INTEGER NOT NULL
 );
+
+-- 11. Riwayat & Log Sinkronisasi Multi-Cabang
+CREATE TABLE IF NOT EXISTS sync_logs (
+    id TEXT PRIMARY KEY,
+    branch_id TEXT REFERENCES branches(id),
+    sync_direction TEXT CHECK(sync_direction IN ('push', 'pull', 'two_way')),
+    sync_type TEXT DEFAULT 'cloud_relay' CHECK(sync_type IN ('cloud_relay', 'mesh_vpn')),
+    records_pushed INTEGER DEFAULT 0,
+    records_pulled INTEGER DEFAULT 0,
+    status TEXT CHECK(status IN ('success', 'failed', 'partial')),
+    error_message TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
 "#;
 
 pub const SEED_DATA_SQL: &str = r#"
 -- Inisialisasi Data Default jika kosong
 
--- Cabang Utama Default
-INSERT OR IGNORE INTO branches (id, code, name, address, phone, is_headquarters)
-VALUES ('b0000000-0000-0000-0000-000000000001', 'PST-01', 'Toko Kasir Pusat', 'Jl. Utama No. 1', '08123456789', 1);
+-- Cabang Master Default
+INSERT OR IGNORE INTO branches (id, code, name, address, phone, is_headquarters, api_endpoint, api_key) VALUES
+('b0000000-0000-0000-0000-000000000001', 'PST-01', 'Toko Kasir Pusat (Jakarta)', 'Jl. Perdagangan Niaga No. 88, Jakarta Pusat', '021-5551234', 1, 'https://sync.tokokasir.id/api/v1', 'KEY-HQ-PST01'),
+('b0000000-0000-0000-0000-000000000002', 'SBY-02', 'Cabang Surabaya Gubeng', 'Jl. Pemuda No. 45, Surabaya', '031-7778899', 0, 'http://100.64.0.2:8080', 'KEY-BR-SBY02'),
+('b0000000-0000-0000-0000-000000000003', 'BDG-03', 'Cabang Bandung Dago', 'Jl. Ir. H. Juanda No. 112, Bandung', '022-8889900', 0, 'http://100.64.0.3:8080', 'KEY-BR-BDG03');
 
 -- Pengaturan Toko
 INSERT OR IGNORE INTO app_settings (setting_key, setting_value, setting_group) VALUES
@@ -280,7 +295,14 @@ INSERT OR IGNORE INTO app_settings (setting_key, setting_value, setting_group) V
 ('receipt_auto_cut', '1', 'receipt'),
 ('receipt_open_drawer', '1', 'receipt'),
 ('tax_mode_default', 'inclusive', 'tax'),
-('app_mode', 'standalone', 'network'); -- 'standalone', 'server', 'client'
+('app_mode', 'standalone', 'network'), -- 'standalone', 'server', 'client'
+('current_branch_id', 'b0000000-0000-0000-0000-000000000001', 'sync'),
+('sync_mode', 'cloud_relay', 'sync'),
+('cloud_relay_url', 'https://sync.tokokasir.id/api/v1', 'sync'),
+('cloud_relay_api_key', 'KEY-HQ-BERKAH-2026', 'sync'),
+('mesh_vpn_ip', '100.64.0.1:8080', 'sync'),
+('auto_sync_interval', '5', 'sync'),
+('last_sync_time', 'Belum pernah', 'sync');
 
 -- Pajak Default
 INSERT OR IGNORE INTO taxes (id, name, rate_percent, is_default, is_active) VALUES

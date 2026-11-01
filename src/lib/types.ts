@@ -381,3 +381,118 @@ export interface ShiftReport {
   report_text: string;
 }
 
+// ============================================================================
+// SPRINT 6: MULTI-CABANG & SINKRONISASI
+// ============================================================================
+
+export interface Branch {
+  id: string;
+  code: string;
+  name: string;
+  address?: string;
+  phone?: string;
+  is_headquarters: number;
+  api_endpoint?: string;
+  api_key?: string;
+  created_at: string;
+}
+
+export interface CreateBranchInput {
+  code: string;
+  name: string;
+  address?: string;
+  phone?: string;
+  is_headquarters: number;
+  api_endpoint?: string;
+  api_key?: string;
+}
+
+export interface InterBranchTransfer {
+  id: string;
+  transfer_number: string;
+  source_branch_id: string;
+  source_branch_name: string;
+  destination_branch_id: string;
+  destination_branch_name: string;
+  status: "draft" | "in_transit" | "received" | "cancelled";
+  sent_by?: string;
+  sent_by_name?: string;
+  received_by?: string;
+  received_by_name?: string;
+  sent_at?: string;
+  received_at?: string;
+  sync_status: string;
+  notes?: string;
+  items_count: number;
+  created_at: string;
+}
+
+export interface InterBranchTransferItem {
+  id: string;
+  transfer_id: string;
+  product_id: string;
+  product_name: string;
+  sku: string;
+  unit_id: string;
+  unit_name: string;
+  quantity: number;
+  base_qty: number;
+}
+
+export interface CreateTransferItemInput {
+  product_id: string;
+  unit_id: string;
+  quantity: number;
+}
+
+export interface CreateInterBranchTransferInput {
+  destination_branch_id: string;
+  sent_by?: string;
+  notes?: string;
+  items: CreateTransferItemInput[];
+}
+
+export interface InterBranchTransferDetail {
+  transfer: InterBranchTransfer;
+  items: InterBranchTransferItem[];
+  source_branch: Branch;
+  destination_branch: Branch;
+}
+
+export interface BranchStockInfo {
+  branch_id: string;
+  branch_code: string;
+  branch_name: string;
+  stock_qty: number;
+  base_unit_name: string;
+  address?: string;
+  phone?: string;
+  is_current_branch: boolean;
+}
+
+export interface SyncLog {
+  id: string;
+  branch_id?: string;
+  branch_name?: string;
+  sync_direction: string;
+  sync_type: string;
+  records_pushed: number;
+  records_pulled: number;
+  status: string;
+  error_message?: string;
+  created_at: string;
+}
+
+export interface SyncStatusSummary {
+  pending_transactions: number;
+  pending_transfers: number;
+  last_sync_time: string;
+  last_sync_status: string;
+  current_branch_code: string;
+  current_branch_name: string;
+  is_headquarters: boolean;
+  sync_mode: string;
+  cloud_relay_url: string;
+  mesh_vpn_ip: string;
+}
+

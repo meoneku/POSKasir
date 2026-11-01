@@ -74,6 +74,19 @@ pub fn run() {
             commands::get_customer_debt_history,
             commands::check_customer_credit_limit,
             commands::get_delivery_order,
+            commands::get_branches,
+            commands::create_branch,
+            commands::get_current_branch,
+            commands::set_current_branch,
+            commands::get_inter_branch_transfers,
+            commands::get_inter_branch_transfer_detail,
+            commands::create_inter_branch_transfer,
+            commands::receive_inter_branch_transfer,
+            commands::get_cross_branch_stock,
+            commands::get_sync_status,
+            commands::trigger_branch_sync,
+            commands::get_sync_logs,
+            commands::update_sync_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

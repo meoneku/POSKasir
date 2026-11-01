@@ -138,6 +138,10 @@ impl ServerManager {
             .route("/api/v1/catalog", get(handle_get_catalog))
             .route("/api/v1/transactions", post(handle_create_transaction))
             .route("/api/v1/reports/summary", get(handle_get_summary))
+            .route("/api/v1/sync/status", get(handle_sync_status))
+            .route("/api/v1/sync/push", post(handle_sync_push))
+            .route("/api/v1/sync/pull", get(handle_sync_pull))
+            .route("/api/v1/sync/branch-stocks", get(handle_branch_stocks))
             .route("/ws", get(handle_ws_upgrade))
             .layer(CorsLayer::permissive())
             .with_state(app_state);
@@ -533,4 +537,95 @@ async fn handle_websocket(socket: WebSocket, state: AppServerState) {
         "Klien kasir terputus dari WebSocket. Sisa klien: {}",
         state.connected_clients.load(Ordering::SeqCst)
     );
+}
+
+// --- SPRINT 6: MULTI-CABANG SYNC ENDPOINTS ---
+
+async fn handle_sync_status(AxumState(state): AxumState<AppServerState>) -> impl IntoResponse {
+    let conn = state.db.conn.lock();
+    let tx_count: i64 = conn.query_row("SELECT COUNT(*) FROM transactions", [], |r| r.get(0)).unwrap_or(0);
+    let prod_count: i64 = conn.query_row("SELECT COUNT(*) FROM products", [], |r| r.get(0)).unwrap_or(0);
+    let branch_count: i64 = conn.query_row("SELECT COUNT(*) FROM branches", [], |r| r.get(0)).unwrap_or(0);
+
+    Json(serde_json::json!({
+        "status": "online",
+        "service": "central_sync_hub",
+        "total_branches": branch_count,
+        "total_products": prod_count,
+        "total_transactions": tx_count,
+        "timestamp": Local::now().to_rfc3339()
+    }))
+}
+
+async fn handle_sync_push(
+    AxumState(state): AxumState<AppServerState>,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let branch_code = payload.get("branch_code").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
+    let tx_items = payload.get("transactions").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+    let trf_items = payload.get("transfers").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+
+    let broadcast_event = serde_json::json!({
+        "branch_code": branch_code,
+        "pushed_transactions": tx_items,
+        "pushed_transfers": trf_items,
+        "synced_at": Local::now().to_rfc3339()
+    });
+    let _ = state.ws_broadcast_tx.send(serde_json::json!({
+        "event_type": "BRANCH_SYNC_RECEIVED",
+        "payload": broadcast_event,
+        "timestamp": Local::now().to_rfc3339()
+    }).to_string());
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "status": "success",
+        "message": format!("Menerima {} transaksi & {} mutasi dari cabang {}", tx_items, trf_items, branch_code),
+        "received_at": Local::now().to_rfc3339()
+    })))
+}
+
+async fn handle_sync_pull(AxumState(state): AxumState<AppServerState>) -> impl IntoResponse {
+    let conn = state.db.conn.lock();
+    let mut stmt = match conn.prepare("SELECT id, sku, barcode, name, current_stock FROM products WHERE is_active = 1") {
+        Ok(s) => s,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))),
+    };
+
+    let items = stmt.query_map([], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, String>(0)?,
+            "sku": r.get::<_, String>(1)?,
+            "barcode": r.get::<_, Option<String>>(2)?,
+            "name": r.get::<_, String>(3)?,
+            "current_stock": r.get::<_, i64>(4)?,
+        }))
+    }).map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>()).unwrap_or_default();
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "status": "success",
+        "products": items,
+        "timestamp": Local::now().to_rfc3339()
+    })))
+}
+
+async fn handle_branch_stocks(AxumState(state): AxumState<AppServerState>) -> impl IntoResponse {
+    let conn = state.db.conn.lock();
+    let mut stmt = match conn.prepare("SELECT id, code, name FROM branches") {
+        Ok(s) => s,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e.to_string() }))),
+    };
+
+    let branches = stmt.query_map([], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, String>(0)?,
+            "code": r.get::<_, String>(1)?,
+            "name": r.get::<_, String>(2)?,
+        }))
+    }).map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>()).unwrap_or_default();
+
+    (StatusCode::OK, Json(serde_json::json!({
+        "status": "success",
+        "branches": branches,
+        "timestamp": Local::now().to_rfc3339()
+    })))
 }
